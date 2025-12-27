@@ -30,6 +30,6 @@
 #define MAX_TIMER       240 // min - 最大定时 240 分钟（4 小时）；Maximum timer (4 hours)
 
 #define SPLASH_DURATION 2   // sec - 开机闪屏 2 秒；2 seconds splash state
-#define CHANGE_TIMEOUT  5   // sec - 调整超时时间 5 秒；5 seconds adjust timeout
+#define CHANGE_TIMEOUT  15  // sec - 调整超时时间 15 秒；15 seconds adjust timeout
 #define SLEEP_TIMOUT    5   // min - 5 分钟无操作进入休眠；5 minutes to transition to sleep
 #define PAUSE_TIMEOUT   10  // min - 暂停 10 分钟后取消定时；10 minutes to cancel the timer if stayed paused
