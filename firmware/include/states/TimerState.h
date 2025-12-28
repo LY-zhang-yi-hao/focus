@@ -1,6 +1,7 @@
 #pragma once
 
 #include "State.h"
+#include <Arduino.h>
 
 class TimerState : public State
 {
@@ -11,10 +12,19 @@ public:
     void update() override;
     void exit() override;
 
-    void setTimer(int duration, unsigned long elapsedTime);
+    void setTimer(int duration,
+                  unsigned long elapsedTime,
+                  const String& taskId = "",
+                  const String& taskName = "",
+                  const String& sessionId = "",
+                  const String& taskDisplayName = "");
 
 private:
     int duration;
     unsigned long startTime;
     unsigned long elapsedTime;
+    String taskId;
+    String taskName;
+    String sessionId;
+    String taskDisplayName;
 };

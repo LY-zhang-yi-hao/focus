@@ -4,8 +4,11 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
+#include <WebServer.h>
 #include <BluetoothA2DPSink.h>
+#include <ArduinoJson.h>
 #include <esp_bt.h>
+#include <memory>
 
 NetworkController *NetworkController::instance = nullptr;
 
@@ -18,7 +21,11 @@ NetworkController::NetworkController()
       bluetoothTaskHandle(nullptr),
       webhookQueue(nullptr),
       webhookTaskHandle(nullptr),
-      provisioningMode(false)
+      provisioningMode(false),
+      apiServer(nullptr),
+      apiServerStarted(false),
+      lastTaskListJson(""),
+      onTaskListUpdate(nullptr)
 {
 
     instance = this;
@@ -69,6 +76,8 @@ void NetworkController::begin()
         xTaskCreatePinnedToCore(webhookTask, "Webhook Task", 4096, this, 0, &webhookTaskHandle, 1);
         Serial.println("Persistent webhook task started. / Webhook 任务已启动");
     }
+
+    // API Server will be started lazily after WiFi is connected / 在 WiFi 连接后再延迟启动 API 服务器
 }
 
 void NetworkController::update()
@@ -76,6 +85,12 @@ void NetworkController::update()
     if (WiFi.status() != WL_CONNECTED)
     {
         WiFi.reconnect();
+    }
+
+    ensureApiServer();
+    if (apiServerStarted && apiServer != nullptr)
+    {
+        apiServer->handleClient();
     }
 }
 
@@ -250,57 +265,67 @@ void NetworkController::bluetoothTask(void *param)
 
 void NetworkController::sendWebhookAction(const String &action)
 {
+    DynamicJsonDocument doc(128);
+    doc["action"] = action;
+
+    String payload;
+    serializeJson(doc, payload);
+    sendWebhookPayload(payload);
+}
+
+void NetworkController::sendWebhookPayload(const String &payload)
+{
     if (webhookQueue == nullptr)
     {
         webhookQueue = xQueueCreate(5, sizeof(char *));
     }
 
-    char *actionCopy = strdup(action.c_str());
-    if (actionCopy == nullptr)
+    char *payloadCopy = strdup(payload.c_str());
+    if (payloadCopy == nullptr)
     {
-        Serial.println("Failed to allocate memory for webhook action. / 分配 webhook 文本内存失败");
+        Serial.println("Failed to allocate memory for webhook payload. / 分配 webhook payload 内存失败");
         return;
     }
 
-    if (xQueueSend(webhookQueue, &actionCopy, 0) == pdPASS)
+    if (xQueueSend(webhookQueue, &payloadCopy, 0) == pdPASS)
     {
-        Serial.println("Webhook action enqueued: " + String(actionCopy) + " / 已入队");
+        Serial.println("Webhook payload enqueued. / Webhook payload 已入队");
     }
     else
     {
-        Serial.println("Failed to enqueue webhook action: Queue is full. / 入队失败，队列已满");
-        free(actionCopy); // Free the memory if not enqueued / 入队失败时释放内存
+        Serial.println("Failed to enqueue webhook payload: Queue is full. / 入队失败，队列已满");
+        free(payloadCopy); // Free the memory if not enqueued / 入队失败时释放内存
     }
 }
 
 void NetworkController::webhookTask(void *param)
 {
     NetworkController *self = static_cast<NetworkController *>(param);
-    char *action;
+    char *payload;
 
     while (true)
     {
         // Wait for a webhook action to arrive in the queue
         // 等待队列中出现新的 webhook 动作
-        if (xQueueReceive(self->webhookQueue, &action, portMAX_DELAY) == pdPASS)
+        if (xQueueReceive(self->webhookQueue, &payload, portMAX_DELAY) == pdPASS)
         {
-            Serial.println("Processing webhook action: " + String(action) + " / 处理 webhook 动作");
+            Serial.println("Processing webhook payload... / 处理 webhook payload");
 
             // Send the webhook request and check the response
             // 发送 webhook 请求并检查结果
-            bool success = self->sendWebhookRequest(String(action));
+            bool success = self->sendWebhookRequest(String(payload));
             if (success)
             {
-                Serial.println("Webhook action sent successfully. / webhook 发送成功");
+                Serial.println("Webhook payload sent successfully. / webhook 发送成功");
             }
             else
             {
-                Serial.println("Failed to send webhook action. / webhook 发送失败");
+                Serial.println("Failed to send webhook payload. / webhook 发送失败");
             }
 
-            free(action); // Free the allocated memory for action / 释放 action 文本内存
+            free(payload); // Free the allocated memory for payload / 释放 payload 文本内存
 
-            Serial.println("Finished processing webhook action. / 处理 webhook 动作完毕");
+            Serial.println("Finished processing webhook payload. / 处理 webhook payload 完毕");
         }
 
         // Small delay to yield / 小延迟，释放 CPU
@@ -308,11 +333,11 @@ void NetworkController::webhookTask(void *param)
     }
 }
 
-bool NetworkController::sendWebhookRequest(const String &action)
+bool NetworkController::sendWebhookRequest(const String &payload)
 {
     if (webhookURL.isEmpty())
     {
-        Serial.println("Webhook URL is not set. Cannot send action. / 未配置 webhook URL，无法发送");
+        Serial.println("Webhook URL is not set. Cannot send payload. / 未配置 webhook URL，无法发送");
         return false;
     }
 
@@ -344,10 +369,8 @@ bool NetworkController::sendWebhookRequest(const String &action)
     {
         http.addHeader("Content-Type", "application/json");
 
-        String jsonPayload = "{\"action\":\"" + action + "\"}";
-
         // Send the POST request / 发送 POST 请求
-        int httpResponseCode = http.POST(jsonPayload);
+        int httpResponseCode = http.POST(payload);
 
         if (httpResponseCode > 0)
         {
@@ -517,4 +540,110 @@ void NetworkController::handleFactoryReset()
 {
     Serial.println("Factory reset initiated. / 已触发恢复出厂设置");
     reset();
+}
+
+// ========== HTTP API Server / HTTP API 服务器 ==========
+
+void NetworkController::setTaskListUpdateCallback(std::function<void(const String&)> callback)
+{
+    onTaskListUpdate = callback;
+}
+
+void NetworkController::ensureApiServer()
+{
+    // 不在配网模式启用，避免与 WiFiProvisioner 的 Web 服务冲突 / Avoid conflicts with WiFiProvisioner server
+    if (provisioningMode)
+    {
+        return;
+    }
+
+    if (!isWiFiProvisioned())
+    {
+        return;
+    }
+
+    if (!isWiFiConnected())
+    {
+        return;
+    }
+
+    if (apiServerStarted)
+    {
+        return;
+    }
+
+    setupApiServer();
+}
+
+void NetworkController::setupApiServer()
+{
+    if (apiServer != nullptr)
+    {
+        delete apiServer;
+        apiServer = nullptr;
+    }
+
+    apiServer = new WebServer(80);
+
+    apiServer->on("/api/tasklist", HTTP_POST, [this]() { handleAPITaskList(); });
+    apiServer->on("/api/status", HTTP_GET, [this]() { handleAPIStatus(); });
+
+    apiServer->begin();
+    apiServerStarted = true;
+    Serial.printf("API Server started on http://%s:80 / API 服务器已启动\n", WiFi.localIP().toString().c_str());
+}
+
+void NetworkController::handleAPITaskList()
+{
+    if (apiServer == nullptr)
+    {
+        return;
+    }
+
+    String body = apiServer->arg("plain");
+    if (body.isEmpty())
+    {
+        apiServer->send(400, "application/json", "{\"status\":\"error\",\"message\":\"Empty body\"}");
+        return;
+    }
+
+    // 基础 JSON 校验（避免明显错误）/ Basic JSON validation
+    DynamicJsonDocument doc(8192);
+    DeserializationError error = deserializeJson(doc, body);
+    if (error)
+    {
+        apiServer->send(400, "application/json", "{\"status\":\"error\",\"message\":\"Invalid JSON\"}");
+        return;
+    }
+
+    if (!doc["tasks"].is<JsonArray>())
+    {
+        apiServer->send(400, "application/json", "{\"status\":\"error\",\"message\":\"Missing tasks\"}");
+        return;
+    }
+
+    lastTaskListJson = body;
+
+    if (onTaskListUpdate)
+    {
+        onTaskListUpdate(body);
+    }
+
+    apiServer->send(200, "application/json", "{\"status\":\"ok\"}");
+}
+
+void NetworkController::handleAPIStatus()
+{
+    if (apiServer == nullptr)
+    {
+        return;
+    }
+
+    DynamicJsonDocument doc(256);
+    doc["wifi_connected"] = isWiFiConnected();
+    doc["tasklist_loaded"] = !lastTaskListJson.isEmpty();
+
+    String out;
+    serializeJson(doc, out);
+    apiServer->send(200, "application/json", out);
 }

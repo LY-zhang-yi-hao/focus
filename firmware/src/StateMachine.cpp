@@ -12,6 +12,8 @@ PausedState StateMachine::pausedState;
 ProvisionState StateMachine::provisionState;
 ResetState StateMachine::resetState;
 StartupState StateMachine::startupState;
+TaskCompletePromptState StateMachine::taskCompletePromptState;
+TaskListState StateMachine::taskListState;
 TimerState StateMachine::timerState;
 
 StateMachine::StateMachine() {
@@ -44,4 +46,17 @@ void StateMachine::update() {
     if (!transition && currentState != nullptr) {
         currentState->update();  // Call update on the current state / 调用当前状态的 update
     }
+}
+
+State* StateMachine::getCurrentState()
+{
+    State* state = nullptr;
+
+    if (xSemaphoreTake(stateMutex, portMAX_DELAY) == pdTRUE)
+    {
+        state = currentState;
+        xSemaphoreGive(stateMutex);
+    }
+
+    return state;
 }

@@ -15,9 +15,6 @@ void DoneState::enter()
                                    {
         Serial.println("Done State: Button pressed / 完成状态：按键按下");
         stateMachine.changeState(&StateMachine::idleState); });
-
-    // Send 'Stop' webhook / 发送停止 webhook
-    networkController.sendWebhookAction("stop");
 }
 
 void DoneState::update()

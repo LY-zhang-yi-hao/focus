@@ -3,6 +3,8 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include "Animation.h"
+#include "models/FocusTask.h"
+#include <vector>
 
 class DisplayController
 {
@@ -19,6 +21,8 @@ public:
     void drawDoneScreen();
     void drawAdjustScreen(int duration);
     void drawProvisionScreen();
+    void drawTaskListScreen(const std::vector<FocusTask>& tasks, int selectedIndex, int displayOffset);
+    void drawTaskCompletePromptScreen(const String& taskName, bool markDoneSelected, bool isCanceled);
     void clear();
 
     void showAnimation(const byte frames[][288], int frameCount, bool loop = false, bool reverse = false, unsigned long durationMs = 0, int width = 48, int height = 48);

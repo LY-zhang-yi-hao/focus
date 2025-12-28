@@ -1,8 +1,12 @@
 #pragma once
 
+#include <Arduino.h>
 #include <BluetoothA2DPSink.h>
 #include <WiFiProvisioner.h>
 #include <Preferences.h>
+#include <functional>
+
+class WebServer;
 
 class NetworkController
 {
@@ -20,6 +24,10 @@ public:
     void startBluetooth();
     void stopBluetooth();
     void sendWebhookAction(const String &action);
+    void sendWebhookPayload(const String &payload);
+
+    // HTTP API callbacks / HTTP API 回调
+    void setTaskListUpdateCallback(std::function<void(const String&)> callback);
 
 private:
     BluetoothA2DPSink a2dp_sink;
@@ -44,7 +52,7 @@ private:
 
     static void bluetoothTask(void *param);
     static void webhookTask(void *param);
-    bool sendWebhookRequest(const String &action);
+    bool sendWebhookRequest(const String &payload);
 
     static NetworkController *instance;
 
@@ -53,4 +61,15 @@ private:
 
     bool validateInput(const String &input);
     void handleFactoryReset();
+
+    // HTTP Server / HTTP 服务器（用于 HA 下发任务列表等）
+    WebServer* apiServer;
+    bool apiServerStarted;
+    String lastTaskListJson;
+    std::function<void(const String&)> onTaskListUpdate;
+
+    void ensureApiServer();
+    void setupApiServer();
+    void handleAPITaskList();
+    void handleAPIStatus();
 };

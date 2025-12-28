@@ -35,6 +35,12 @@ void IdleState::enter()
                                        stateMachine.changeState(&StateMachine::timerState); // Start timer / 切换到计时状态
                                    });
 
+    inputController.onDoublePressHandler([]()
+                                         {
+                                             Serial.println("Idle State: Button double pressed / 空闲状态：双击");
+                                             stateMachine.changeState(&StateMachine::taskListState); // Show task list / 进入任务列表
+                                         });
+
     inputController.onLongPressHandler([this]()
                                        {
                                            Serial.println("Idle State: Button long pressed / 空闲状态：长按");

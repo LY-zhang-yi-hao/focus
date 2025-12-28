@@ -10,6 +10,8 @@
 #include "states/ResetState.h"
 #include "states/SleepState.h"
 #include "states/StartupState.h"
+#include "states/TaskCompletePromptState.h"
+#include "states/TaskListState.h"
 #include "states/TimerState.h"
 
 class StateMachine {
@@ -19,6 +21,7 @@ public:
 
     void changeState(State* newState);
     void update();
+    State* getCurrentState();
 
     // Static states / 静态状态对象
     static AdjustState adjustState;
@@ -29,6 +32,8 @@ public:
     static ProvisionState provisionState;
     static ResetState resetState;
     static StartupState startupState;
+    static TaskCompletePromptState taskCompletePromptState;
+    static TaskListState taskListState;
     static TimerState timerState;
 
 private:

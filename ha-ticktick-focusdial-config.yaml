@@ -1,0 +1,404 @@
+# Home Assistant × TickTick × Focus Dial 完整配置方案
+# 生成时间：2025-12-28
+# 作者：浮浮酱 φ(≧ω≦*)♪
+
+---
+## 配置说明
+
+此文件包含完整的 HA 配置，包括：
+1. REST Command：推送任务列表到 Focus Dial
+2. Input Text：存储今日累计统计
+3. Script：组装 TickTick 任务并推送
+4. Automation：webhook 接收事件 + 累计统计 + 回写 TickTick（不使用 python_script）
+
+---
+## 前置条件
+
+1. ✅ HACS 已安装
+2. ✅ Hantick TickTick 集成已安装并配置
+3. ✅ Focus Dial 已配网（IP: 192.168.15.166）
+4. ✅ TickTick OAuth 已配置（Client ID & Secret）
+5. ✅ TickTick Project ID 已确认（🎃专注清单：`69510f448f0805fa66144dc9`）
+
+---
+## 第一步：创建 Input Text Helper
+
+在 HA Web UI 创建：
+Settings → Devices & services → Helpers → Create Helper → Text
+
+- Name: Focus Dial Stats Today
+- Entity ID: input_text.focus_dial_stats_today
+- Initial value: {}
+- Max length: 255（`input_text` 上限）
+
+或者在 configuration.yaml 添加：
+
+```yaml
+input_text:
+  focus_dial_stats_today:
+    name: "Focus Dial 今日统计"
+    initial: "{}"
+    max: 255
+```
+
+---
+## 第二步：配置 REST Command
+
+在 configuration.yaml 添加（或创建 rest_command.yaml 并 include）：
+
+```yaml
+# 推送任务列表到 Focus Dial
+rest_command:
+  focus_dial_push_tasklist:
+    url: "http://192.168.15.166/api/tasklist"
+    method: POST
+    content_type: "application/json"
+    payload: >
+      {{ tasks_json }}
+    timeout: 5
+```
+
+---
+## 第三步：配置 Script
+
+在 scripts.yaml 添加：
+
+```yaml
+focus_dial_send_ticktick_focus_tasks:
+  alias: "Focus Dial - 推送 TickTick 🎃专注清单任务"
+  description: "读取 todo.zhuan_zhu 的待办任务（needs_action），组装 JSON 推送到 Focus Dial"
+  mode: single
+  sequence:
+    - variables:
+        stats_entity: "input_text.focus_dial_stats_today"
+        stats: "{{ (states(stats_entity) | default('{}')) | from_json | default({}) }}"
+        ticktick_entity: "todo.zhuan_zhu"
+
+    - service: todo.get_items
+      target:
+        entity_id: "{{ ticktick_entity }}"
+      response_variable: todo_items_resp
+
+    - variables:
+        items: "{{ todo_items_resp[ticktick_entity]['items'] | default([]) }}"
+        tasks_json: >
+          {
+            "tasks": [
+              {% set ns = namespace(first=true) %}
+              {% for item in items %}
+                {% if item.status == 'needs_action' %}
+                  {% set uid = (item.uid | default('') | string) %}
+                  {% set raw = (item.summary | default('') | string | regex_replace('[\ud800-\udfff]', '')) %}
+                  {% set ascii = (raw | regex_replace('[^a-zA-Z0-9# ]', '') | upper) %}
+                  {% set suffix = uid[-4:] if (uid | length) >= 4 else uid %}
+                  {% set display = ascii if (ascii | length) > 0 else ('TASK ' ~ suffix) %}
+                  {% if not ns.first %},{% endif %}
+                  {% set ns.first = false %}
+                  {
+                    "id": {{ uid | tojson }},
+                    "name": {{ display | tojson }},
+                    "display_name": {{ display | tojson }},
+                    "duration": 25,
+                    "spent_today_sec": {{ stats.get(uid, 0) | int }}
+                  }
+                {% endif %}
+              {% endfor %}
+            ]
+          }
+
+    - service: rest_command.focus_dial_push_tasklist
+      data:
+        tasks_json: "{{ tasks_json }}"
+
+    - service: system_log.write
+      data:
+        message: "Focus Dial: pushed {{ (tasks_json | from_json).tasks | length }} tasks"
+        level: info
+```
+
+---
+## 第四步：配置 Automation（Webhook + 统计 + 回写）
+
+在 automations.yaml 添加：
+
+```yaml
+# 每日清空统计
+- id: focus_dial_reset_stats_today
+  alias: "Focus Dial - 每日清空统计"
+  description: "每天 0 点清空今日累计统计"
+  trigger:
+    - platform: time
+      at: "00:00:00"
+  action:
+    - service: input_text.set_value
+      data:
+        entity_id: input_text.focus_dial_stats_today
+        value: "{}"
+
+# （可选）HA 启动后自动推送一次任务列表（确保设备随时可用）
+- id: focus_dial_push_tasks_on_startup
+  alias: "Focus Dial - HA 启动后自动推送任务"
+  trigger:
+    - platform: homeassistant
+      event: start
+  action:
+    - delay: "00:00:20"
+    - service: script.focus_dial_send_ticktick_focus_tasks
+  mode: single
+
+# （可选）周期刷新任务列表（让 spent_today_sec 更及时；设备离线时条件会阻止推送）
+- id: focus_dial_push_tasks_periodic
+  alias: "Focus Dial - 周期推送任务列表"
+  trigger:
+    - platform: time_pattern
+      minutes: "/15"
+  condition:
+    - condition: template
+      value_template: "{{ state_attr('sensor.focus_dial_status', 'wifi_connected') == true }}"
+  action:
+    - service: script.focus_dial_send_ticktick_focus_tasks
+  mode: single
+
+# Webhook 接收事件
+- id: focus_dial_webhook_events
+  alias: "Focus Dial - 接收 webhook 事件"
+  description: "处理 Focus Dial 上报的事件：累计统计 + 回写 TickTick"
+  mode: queued
+  max: 10
+  trigger:
+    - platform: webhook
+      webhook_id: focus_dial
+      allowed_methods:
+        - POST
+    # 可选：如果设备固件里已经写死了旧 webhook_id，可在这里兼容
+    - platform: webhook
+      webhook_id: focusdial_910772ca41bc61b2fbf94c466f74d729
+      allowed_methods:
+        - POST
+  variables:
+    payload: "{{ trigger.json }}"
+    ticktick_project_id: "69510f448f0805fa66144dc9"
+    stats_entity: "input_text.focus_dial_stats_today"
+    stats: "{{ (states(stats_entity) | default('{}')) | from_json | default({}) }}"
+  action:
+    - choose:
+        # 1. 正常结束且 count_time=true → 累计统计
+        - conditions:
+            - condition: template
+              value_template: >
+                {{ payload.event == 'focus_completed'
+                   and (payload.count_time | default(false))
+                   and (payload.task_id | default('')) != ''
+                   and (payload.elapsed_seconds | default(0) | int) > 0 }}
+          sequence:
+            - variables:
+                task_id: "{{ payload.task_id }}"
+                add_seconds: "{{ payload.elapsed_seconds | int }}"
+                next_total: "{{ (stats.get(task_id, 0) | int) + add_seconds }}"
+                new_stats: "{{ stats | combine({ task_id: next_total }) }}"
+
+            - service: input_text.set_value
+              data:
+                entity_id: "{{ stats_entity }}"
+                value: "{{ new_stats | to_json }}"
+
+            - service: system_log.write
+              data:
+                message: "Focus Dial: +{{ add_seconds }}s to {{ task_id }} (today={{ next_total }}s)"
+                level: info
+
+            # 可选：专注结束后立刻刷新一次设备任务列表，让 spent_today_sec 及时更新
+            # - service: script.focus_dial_send_ticktick_focus_tasks
+
+        # 2. 用户选择标记完成 → 回写 TickTick
+        - conditions:
+            - condition: template
+              value_template: >
+                {{ payload.event == 'task_done_decision'
+                   and (payload.mark_task_done | default(false))
+                   and (payload.task_id | default('')) != '' }}
+          sequence:
+            - service: ticktick.complete_task
+              data:
+                projectId: "{{ ticktick_project_id }}"
+                taskId: "{{ payload.task_id }}"
+              continue_on_error: true
+              response_variable: complete_response
+
+            - choose:
+                - conditions:
+                    - condition: template
+                      value_template: "{{ complete_response.error is not defined }}"
+                  sequence:
+                    - service: system_log.write
+                      data:
+                        message: "Focus Dial: Completed TickTick task {{ payload.task_id }}"
+                        level: info
+              default:
+                - service: persistent_notification.create
+                  data:
+                    title: "⚠️ TickTick 回写失败"
+                    message: |
+                      任务 ID: {{ payload.task_id }}
+                      任务名称: {{ payload.task_name }}
+                      错误: {{ complete_response.error | default('Unknown error') }}
+                    notification_id: "focus_dial_ticktick_error_{{ payload.task_id }}"
+
+                - service: system_log.write
+                  data:
+                    message: "Focus Dial: Failed to complete TickTick task {{ payload.task_id }}: {{ complete_response.error | default('Unknown') }}"
+                    level: error
+      default: []
+```
+
+---
+## 第五步：配置 Dashboard（可选）
+
+在 Dashboard 添加以下卡片：
+
+### 1. 推送任务按钮
+
+```yaml
+type: button
+name: 📋 立即推送任务到 Focus Dial
+icon: mdi:clipboard-arrow-right
+tap_action:
+  action: call-service
+  service: script.focus_dial_send_ticktick_focus_tasks
+```
+
+### 2. 今日统计显示
+
+```yaml
+type: markdown
+content: |
+  ## 📊 Focus Dial 今日统计
+
+  {% set stats = states('input_text.focus_dial_stats_today') | from_json %}
+  {% if stats %}
+  {% for task_id, seconds in stats.items() %}
+  - **{{ task_id }}**: {{ (seconds / 60) | round(1) }} 分钟
+  {% endfor %}
+  {% else %}
+  暂无统计数据
+  {% endif %}
+title: Focus Dial 今日累计
+```
+
+### 3. 设备状态监控
+
+```yaml
+type: rest
+resource: http://192.168.15.166/api/status
+method: GET
+scan_interval: 30
+value_template: |
+  {% if value_json.wifi_connected %}
+    在线 | 任务列表: {{ 'OK' if value_json.tasklist_loaded else '未加载' }}
+  {% else %}
+    离线
+  {% endif %}
+```
+
+---
+## 第六步：确认 TickTick Project ID（可选）
+
+在 HA 开发者工具 → 服务，调用：
+
+```yaml
+service: ticktick.get_projects
+```
+
+从返回的 JSON 中找到你的 "focus" 项目的 `id`，例如：
+
+```json
+{
+  "data": [
+    {
+      "id": "6987a8plg0rad90bc38b672f",
+      "name": "Focus",
+      ...
+    }
+  ]
+}
+```
+
+本项目“🎃专注清单” Project ID 已确认：`69510f448f0805fa66144dc9`。
+
+---
+## 第七步：测试流程
+
+### 1. 测试推送任务列表
+
+1. 在 HA 开发者工具 → 服务，调用：
+   ```yaml
+   service: script.focus_dial_send_ticktick_focus_tasks
+   ```
+
+2. 检查 Focus Dial 设备：
+   ```bash
+   curl http://192.168.15.166/api/status
+   ```
+   应该显示 `tasklist_loaded: true`
+
+3. 在设备空闲界面双击按键，查看任务列表
+
+### 2. 测试统计累计
+
+1. 在 Focus Dial 选择一个任务并正常完成一次计时
+2. 查看 HA 的 `input_text.focus_dial_stats_today` 实体状态
+3. 应该看到对应任务的秒数增加
+
+### 3. 测试 TickTick 回写
+
+0. 先从 `todo.zhuan_zhu` 的 items 里拿到一个真实任务 `uid`（`todo.get_items` 返回里有）
+1. 在 Focus Dial 完成计时后，选择 YES（标记完成）
+2. 打开 TickTick App，查看任务是否已标记完成
+3. 如果失败，HA 会显示 persistent notification
+
+---
+## 故障排查
+
+### 问题 1：推送任务列表后设备显示 NO TASKS
+
+**检查**：
+1. `curl http://192.168.15.166/api/status` 是否显示 `tasklist_loaded: true`
+2. HA 日志是否有错误：Settings → System → Logs
+3. 脚本生成的 `tasks_json` 是否合法（在开发者工具模板编辑器测试）
+
+### 问题 2：统计不累计
+
+**检查**：
+1. webhook 是否成功接收事件：查看 HA 日志
+2. `input_text.focus_dial_stats_today` 实体状态是否变化（JSON 是否累加）
+3. 日志是否出现：`Focus Dial: +XXs to ...`
+
+### 问题 3：TickTick 回写失败
+
+**检查**：
+1. `ticktick_project_id` 是否正确
+2. `payload.task_id` 格式是否匹配 TickTick 的 task ID
+3. TickTick 集成是否正常工作（测试 `ticktick.get_projects`）
+4. 查看 HA persistent notification 的错误信息
+
+---
+## 配置文件位置总结
+
+```
+/home/zyh/homeassistant/
+├── configuration.yaml           # 添加 input_text + rest_command（建议再设置 internal_url/external_url）
+├── scripts.yaml                 # 添加 focus_dial_send_ticktick_focus_tasks
+└── automations.yaml             # 添加 webhook 自动化 + 每日清空 + 回写
+```
+
+---
+## 下一步（明早 3 分钟验收）
+
+1. 打开 HA：`http://192.168.15.194:8123`
+2. 调用 `script.focus_dial_send_ticktick_focus_tasks` 推送任务列表
+3. 设备空闲界面双击刷新，确认任务出现
+4. 完成一次专注，确认统计累加；选择 YES 验证 TickTick 自动完成
+
+---
+
+浮浮酱祝主人配置顺利喵～ ฅ'ω'ฅ

@@ -1,7 +1,17 @@
 #include "StateMachine.h"
 #include "Controllers.h"
+#include <ArduinoJson.h>
 
-PausedState::PausedState() : duration(0), elapsedTime(0), pauseEnter(0) {}
+PausedState::PausedState()
+    : duration(0),
+      elapsedTime(0),
+      pauseEnter(0),
+      taskId(""),
+      taskName(""),
+      sessionId(""),
+      taskDisplayName("")
+{
+}
 
 void PausedState::enter()
 {
@@ -14,23 +24,55 @@ void PausedState::enter()
                                    {
                                        Serial.println("Paused State: Button Pressed / 暂停状态：按键按下");
 
-                                       // Send 'Start' webhook (resume)
-                                       networkController.sendWebhookAction("start");
-
                                        // Transition back to TimerState with the stored duration and elapsed time
-                                       StateMachine::timerState.setTimer(duration, elapsedTime);
+                                       StateMachine::timerState.setTimer(
+                                           duration,
+                                           elapsedTime,
+                                           taskId,
+                                           taskName,
+                                           sessionId,
+                                           taskDisplayName);
                                        displayController.showTimerResume();
                                        stateMachine.changeState(&StateMachine::timerState); // Transition back to Timer State / 返回计时状态
                                    });
 
-    inputController.onDoublePressHandler([]()
+    inputController.onDoublePressHandler([this]()
                                          {
                                              Serial.println("Paused State: Button Double Pressed / 暂停状态：双击");
 
-                                             // Send 'Stop' webhook (canceled)
-                                             networkController.sendWebhookAction("stop");
+                                             // Send 'Stop' webhook (canceled) / 发送取消事件（不计入今日统计）
+                                             DynamicJsonDocument doc(768);
+                                             doc["action"] = "stop";
+                                             doc["event"] = "focus_canceled";
+                                             doc["session_id"] = sessionId;
+                                             doc["task_id"] = taskId;
+                                             doc["task_name"] = taskName;
+                                             doc["task_display_name"] = taskDisplayName;
+                                             doc["elapsed_seconds"] = (uint32_t)elapsedTime;
+                                             doc["count_time"] = false;
+
+                                             String payload;
+                                             serializeJson(doc, payload);
+                                             networkController.sendWebhookPayload(payload);
+
                                              displayController.showCancel();
-                                             stateMachine.changeState(&StateMachine::idleState); // Transition back to Idle State / 返回空闲状态
+
+                                             if (!taskId.isEmpty())
+                                             {
+                                                 StateMachine::taskCompletePromptState.setContext(
+                                                     taskId,
+                                                     taskName,
+                                                     sessionId,
+                                                     (uint32_t)elapsedTime,
+                                                     false,
+                                                     true,
+                                                     taskDisplayName);
+                                                 stateMachine.changeState(&StateMachine::taskCompletePromptState);
+                                             }
+                                             else
+                                             {
+                                                 stateMachine.changeState(&StateMachine::idleState); // Transition back to Idle State / 返回空闲状态
+                                             }
                                          });
 }
 
@@ -38,6 +80,7 @@ void PausedState::update()
 {
     inputController.update();
     ledController.update();
+    networkController.update();
 
     // Redraw the paused screen with remaining time / 按剩余时间重绘暂停界面
     int remainingTime = (duration * 60) - elapsedTime;
@@ -51,10 +94,40 @@ void PausedState::update()
         // Timeout reached, transition to Idle State / 超时后回到空闲
         Serial.println("Paused State: Timout / 暂停状态：超时");
 
-        // Send 'Stop' webhook (timeout)
-        networkController.sendWebhookAction("stop");
+        // Send 'Stop' webhook (timeout) / 暂停超时视为取消（不计入今日统计）
+        DynamicJsonDocument doc(768);
+        doc["action"] = "stop";
+        doc["event"] = "focus_canceled";
+        doc["session_id"] = sessionId;
+        doc["task_id"] = taskId;
+        doc["task_name"] = taskName;
+        doc["task_display_name"] = taskDisplayName;
+        doc["elapsed_seconds"] = (uint32_t)elapsedTime;
+        doc["count_time"] = false;
+        doc["cancel_reason"] = "pause_timeout";
+
+        String payload;
+        serializeJson(doc, payload);
+        networkController.sendWebhookPayload(payload);
+
         displayController.showCancel();
-        stateMachine.changeState(&StateMachine::idleState); // Transition back to Idle State / 返回空闲
+
+        if (!taskId.isEmpty())
+        {
+            StateMachine::taskCompletePromptState.setContext(
+                taskId,
+                taskName,
+                sessionId,
+                (uint32_t)elapsedTime,
+                false,
+                true,
+                taskDisplayName);
+            stateMachine.changeState(&StateMachine::taskCompletePromptState);
+        }
+        else
+        {
+            stateMachine.changeState(&StateMachine::idleState); // Transition back to Idle State / 返回空闲
+        }
     }
 }
 
@@ -64,8 +137,17 @@ void PausedState::exit()
     inputController.releaseHandlers();
 }
 
-void PausedState::setPause(int duration, unsigned long elapsedTime)
+void PausedState::setPause(int duration,
+                           unsigned long elapsedTime,
+                           const String& taskId,
+                           const String& taskName,
+                           const String& sessionId,
+                           const String& taskDisplayName)
 {
     this->duration = duration;
     this->elapsedTime = elapsedTime;
+    this->taskId = taskId;
+    this->taskName = taskName;
+    this->sessionId = sessionId;
+    this->taskDisplayName = taskDisplayName;
 }

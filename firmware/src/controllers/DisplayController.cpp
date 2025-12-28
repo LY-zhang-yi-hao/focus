@@ -4,6 +4,17 @@
 #include "fonts/Org_01.h"
 #include "bitmaps.h"
 
+// 判断字符串是否为可打印 ASCII（用于在小字库下避免中文渲染为空白）/ ASCII printable check
+static bool isAsciiPrintable(const String& text) {
+    for (size_t i = 0; i < text.length(); i++) {
+        unsigned char c = static_cast<unsigned char>(text[i]);
+        if (c < 0x20 || c > 0x7E) {
+            return false;
+        }
+    }
+    return true;
+}
+
 DisplayController::DisplayController(uint8_t oledWidth, uint8_t oledHeight, uint8_t oledAddress)
     : oled(oledWidth, oledHeight, &Wire, -1), animation(&oled) {}
 
@@ -390,7 +401,7 @@ void DisplayController::drawAdjustScreen(int duration) {
 
 
 void DisplayController::drawProvisionScreen() {
-    if (isAnimationRunning()) return; 
+    if (isAnimationRunning()) return;
 
     oled.clearDisplay();
 
@@ -404,6 +415,167 @@ void DisplayController::drawProvisionScreen() {
     oled.setCursor(35, 58);
     oled.print("TO PROVISION WIFI");
     oled.drawBitmap(39, 4, provision_logo, 51, 23, 1);
+
+    oled.display();
+}
+
+void DisplayController::drawTaskListScreen(const std::vector<FocusTask>& tasks, int selectedIndex, int displayOffset) {
+    if (isAnimationRunning()) return;
+
+    oled.clearDisplay();
+
+    // Title / 标题
+    oled.setTextColor(1);
+    oled.setTextSize(1);
+    oled.setFont(&Picopixel);
+    oled.setCursor(34, 8);
+    oled.print("SELECT TASK");
+
+    // Empty state / 空列表提示
+    if (tasks.empty()) {
+        oled.setCursor(38, 30);
+        oled.print("NO TASKS");
+        oled.setCursor(22, 42);
+        oled.print("PUSH FROM HA");
+        oled.display();
+        return;
+    }
+
+    const int START_Y = 16;
+    const int LINE_HEIGHT = 14;
+    const int MAX_VISIBLE = 3;
+
+    // Clamp selection / 保护选中索引
+    if (selectedIndex < 0) selectedIndex = 0;
+    if (selectedIndex >= (int)tasks.size()) selectedIndex = (int)tasks.size() - 1;
+
+    for (int i = 0; i < MAX_VISIBLE && (displayOffset + i) < (int)tasks.size(); i++) {
+        int taskIndex = displayOffset + i;
+        int yPos = START_Y + (i * LINE_HEIGHT);
+
+        if (taskIndex == selectedIndex) {
+            oled.fillRect(0, yPos - 2, 128, LINE_HEIGHT, 1);
+            oled.setTextColor(0);
+        } else {
+            oled.setTextColor(1);
+        }
+
+        // Name (truncate) / 任务名（截断）
+        // 优先显示 displayName（HA 下发的 ASCII/拼音/简称），否则回退 name / Prefer displayName, fallback to name
+        String name = tasks[taskIndex].displayName;
+        if (name.isEmpty()) {
+            name = tasks[taskIndex].name;
+        }
+
+        // 若包含非 ASCII 字符（如中文），在当前字体下可能显示为空白，提供兜底 / Fallback for non-ASCII
+        if (name.isEmpty() || !isAsciiPrintable(name)) {
+            String suffix = tasks[taskIndex].id;
+            if (suffix.length() > 4) {
+                suffix = suffix.substring(suffix.length() - 4);
+            }
+            if (!suffix.isEmpty() && isAsciiPrintable(suffix)) {
+                name = "TASK " + suffix;
+            } else {
+                name = "TASK " + String(taskIndex + 1);
+            }
+        }
+
+        if (name.length() > 16) {
+            name = name.substring(0, 13) + "...";
+        }
+        oled.setCursor(4, yPos + 9);
+        oled.print(name);
+    }
+
+    // Bottom info line for selected task / 底部显示选中任务信息（建议时长 + 今日累计）
+    const FocusTask& selectedTask = tasks[selectedIndex];
+    uint32_t todayMin = selectedTask.spentTodaySeconds / 60;
+    uint32_t todayH = todayMin / 60;
+    uint32_t todayM = todayMin % 60;
+
+    char info[32];
+    if (todayH > 0) {
+        snprintf(info, sizeof(info), "D%dm T%luh%02lu",
+                 selectedTask.estimatedDuration,
+                 (unsigned long)todayH,
+                 (unsigned long)todayM);
+    } else {
+        snprintf(info, sizeof(info), "D%dm T%lum",
+                 selectedTask.estimatedDuration,
+                 (unsigned long)todayMin);
+    }
+
+    oled.setTextColor(1);
+    oled.setCursor(4, 62);
+    oled.print(info);
+
+    // Scroll indicators / 滚动提示
+    if (displayOffset > 0) {
+        oled.fillTriangle(124, 14, 120, 18, 128, 18, 1);
+    }
+    if (displayOffset + MAX_VISIBLE < (int)tasks.size()) {
+        oled.fillTriangle(124, 62, 120, 58, 128, 58, 1);
+    }
+
+    oled.display();
+}
+
+void DisplayController::drawTaskCompletePromptScreen(const String& taskName, bool markDoneSelected, bool isCanceled) {
+    if (isAnimationRunning()) return;
+
+    oled.clearDisplay();
+
+    oled.setTextColor(1);
+    oled.setTextSize(1);
+    oled.setFont(&Picopixel);
+
+    // Title / 标题
+    oled.setCursor(44, 8);
+    oled.print(isCanceled ? "CANCELED" : "DONE");
+
+    // Task name / 任务名
+    String name = taskName;
+    if (name.length() > 18) {
+        name = name.substring(0, 15) + "...";
+    }
+    oled.setCursor(8, 24);
+    oled.print(name);
+
+    // Prompt / 提示文案
+    oled.setCursor(36, 36);
+    oled.print("MARK DONE?");
+
+    // Options / 选项
+    const int boxY = 46;
+    const int boxW = 48;
+    const int boxH = 14;
+    const int yesX = 14;
+    const int noX = 66;
+
+    if (markDoneSelected) {
+        oled.fillRoundRect(yesX, boxY, boxW, boxH, 2, 1);
+        oled.drawRoundRect(noX, boxY, boxW, boxH, 2, 1);
+        oled.setTextColor(0);
+        oled.setCursor(32, boxY + 10);
+        oled.print("YES");
+        oled.setTextColor(1);
+        oled.setCursor(86, boxY + 10);
+        oled.print("NO");
+    } else {
+        oled.drawRoundRect(yesX, boxY, boxW, boxH, 2, 1);
+        oled.fillRoundRect(noX, boxY, boxW, boxH, 2, 1);
+        oled.setTextColor(1);
+        oled.setCursor(32, boxY + 10);
+        oled.print("YES");
+        oled.setTextColor(0);
+        oled.setCursor(86, boxY + 10);
+        oled.print("NO");
+        oled.setTextColor(1);
+    }
+
+    // Hint / 操作提示
+    oled.setCursor(12, 62);
+    oled.print("TURN=SEL PRESS=OK");
 
     oled.display();
 }
