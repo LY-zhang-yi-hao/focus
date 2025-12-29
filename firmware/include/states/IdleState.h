@@ -14,4 +14,5 @@ public:
 private:
     int defaultDuration;
     unsigned long lastActivity;
+    static bool bootCompleted;  // 标记是否已完成首次启动通知
 };

@@ -12,18 +12,18 @@
   - `GET http://192.168.15.166/api/status`
   - `POST http://192.168.15.166/api/tasklist`
 - 设备交互：
-  - 空闲界面双击进入 `SELECT TASK`
+  - 空闲界面双击进入任务列表（待办/已完成，双击切换）
   - 旋钮选择任务，按键开始计时
-  - 结束/取消后弹窗 YES/NO：是否标记任务完成，并上报 `task_done_decision`
+  - 结束/取消后弹窗“是/否”：是否标记任务完成，并上报 `task_done_decision`
 - 统计口径（已固化）：
   - 仅 `focus_completed` 且 `count_time=true` 计入今日累计
   - `pause/cancel` 不计入
-- 中文显示（已修复 A）：
-  - 支持 `display_name`（设备端优先显示），解决中文标题在小字库下显示为空白的问题
+- 中文显示（已完成）：
+  - 固件集成中文字库（`U8g2_for_Adafruit_GFX` + `u8g2_font_wqy12_t_gb2312`），OLED 可原生显示中文任务名与全中文界面文案
 
 ---
 
-## M1（P0）HA 推送任务列表闭环（含 display_name）
+## M1（P0）HA 推送任务列表闭环（含 status）
 
 ### 目标
 
@@ -33,12 +33,12 @@
 
 - TickTick → HA：拉取任务并过滤 `#focus`
 - HA → 设备：周期性 + 手动触发推送 `/api/tasklist`
-- 生成 `display_name`：确保设备端可显示（ASCII/拼音/简称/编号）
+- 同步 `status`：同时下发待办/已完成，设备端可切换查看
 
 ### 交付物
 
 - `rest_command.focus_dial_push_tasklist`（指向 `http://192.168.15.166/api/tasklist`）
-- `script.focus_dial_send_ticktick_focus_tasks`（组装 payload：`id/name/display_name/duration/spent_today_sec`）
+- `script.focus_dial_send_ticktick_focus_tasks`（组装 payload：`id/name/display_name/status/duration/spent_today_sec`）
 - 一个手动触发入口：
   - HA 面板按钮/脚本按钮（“立即推送任务”）
 
@@ -73,10 +73,8 @@
 
 ### 交付物
 
-- `input_text.focus_dial_stats_today`（JSON 字典，key=task_id, value=seconds）
-- 累加实现（推荐优先）：
-  - 自动化内 Jinja：`combine + to_json`（零依赖，已验证可用）
-  - （可选）`pyscript` / Node-RED flow（适合更复杂的存储与去重）
+- 统计持久化（推荐）：HA 自定义组件写入 `.storage/focus_dial_stats`（长期累加总学习时长，不受 255 限制）
+- 累加实现（可选）：旧版 YAML 仍可用 `input_text`（但受长度限制）
 - Dashboard 卡片：展示今日累计（按任务）
 
 ### 验收标准
@@ -98,7 +96,7 @@
 
 ### 目标
 
-- 当设备弹窗选择 YES（`task_done_decision.mark_task_done == true`）时，HA 自动把该任务回写为 TickTick “已完成”。
+- 当设备弹窗选择“是”（`task_done_decision.mark_task_done == true`）时，HA 自动把该任务回写为 TickTick “已完成”，并立刻刷新列表推送到设备（待办消失/进入已完成）。
 
 ### 推荐实现路径（你确认：优先用现有 HA/TickTick 集成服务）
 

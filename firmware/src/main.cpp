@@ -24,13 +24,7 @@ void setup() {
         Serial.println("Callback: Received task list / 回调：收到任务列表");
         StateMachine::taskListState.updateTaskList(jsonTaskList);
 
-        // Only switch to task list when idle/sleep, avoid interrupting focus session
-        // 仅在空闲/休眠时切换，避免打断计时
-        State* current = stateMachine.getCurrentState();
-        if (current == &StateMachine::idleState || current == &StateMachine::sleepState)
-        {
-            stateMachine.changeState(&StateMachine::taskListState);
-        }
+        // 静默更新任务列表：仅刷新缓存，不自动切换界面（避免推送后直接跳转到任务清单）
     });
 
     // Startup state / 进入启动状态

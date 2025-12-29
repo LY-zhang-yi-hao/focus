@@ -2,6 +2,7 @@
 
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <U8g2_for_Adafruit_GFX.h>
 #include "Animation.h"
 #include "models/FocusTask.h"
 #include <vector>
@@ -21,7 +22,9 @@ public:
     void drawDoneScreen();
     void drawAdjustScreen(int duration);
     void drawProvisionScreen();
-    void drawTaskListScreen(const std::vector<FocusTask>& tasks, int selectedIndex, int displayOffset);
+    void drawTaskListScreen(const std::vector<FocusTask>& tasks, int selectedIndex, int displayOffset, bool showingCompleted);
+    void drawTaskListViewScreen(const std::vector<FocusTask>& tasks, int selectedIndex, int displayOffset, bool showingCompleted);
+    void drawDurationSelectScreen(const String& taskName, int duration);
     void drawTaskCompletePromptScreen(const String& taskName, bool markDoneSelected, bool isCanceled);
     void clear();
 
@@ -40,5 +43,6 @@ public:
 
 private:
     Adafruit_SSD1306 oled;
+    U8G2_FOR_ADAFRUIT_GFX u8g2Fonts;
     Animation animation;
 };

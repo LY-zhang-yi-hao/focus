@@ -12,6 +12,30 @@
 4. Automation：webhook 接收事件 + 累计统计 + 回写 TickTick（不使用 python_script）
 
 ---
+## ✅ 推荐（方案 2 稳）：使用本仓库的 HA 自定义组件（写入 .storage）
+
+> 适用：你想长期累加“总学习时长”，并且希望设备选择 YES 后任务立刻从待办消失/进入已完成，同时自动刷新并重新推送到设备。
+
+1) 复制本仓库 `custom_components/focus_dial/` 到你的 HA：
+- HA OS / Supervised：`/config/custom_components/focus_dial/`
+
+2) 在 `configuration.yaml` 添加：
+
+```yaml
+focus_dial:
+  device_host: 192.168.15.166
+  todo_entity_id: todo.zhuan_zhu
+  ticktick_project_id: "69510f448f0805fa66144dc9"
+  webhook_id: focus_dial
+  default_duration: 25
+  max_pending: 20
+  max_completed: 20
+```
+
+3) 重启 HA 后，开发者工具 → 服务 → 调用 `focus_dial.push_tasks` 即可推送任务到设备。  
+统计会写入 `.storage/focus_dial_stats`（不会受 `input_text` 255 限制）。
+
+---
 ## 前置条件
 
 1. ✅ HACS 已安装
@@ -66,7 +90,7 @@ rest_command:
 ```yaml
 focus_dial_send_ticktick_focus_tasks:
   alias: "Focus Dial - 推送 TickTick 🎃专注清单任务"
-  description: "读取 todo.zhuan_zhu 的待办任务（needs_action），组装 JSON 推送到 Focus Dial"
+  description: "读取 todo.zhuan_zhu 的任务（含待办/已完成），组装 JSON 推送到 Focus Dial（不做拼音/ASCII）"
   mode: single
   sequence:
     - variables:
@@ -86,18 +110,17 @@ focus_dial_send_ticktick_focus_tasks:
             "tasks": [
               {% set ns = namespace(first=true) %}
               {% for item in items %}
-                {% if item.status == 'needs_action' %}
+                {% set status = (item.status | default('needs_action') | string) %}
+                {% if status in ['needs_action', 'completed'] %}
                   {% set uid = (item.uid | default('') | string) %}
-                  {% set raw = (item.summary | default('') | string | regex_replace('[\ud800-\udfff]', '')) %}
-                  {% set ascii = (raw | regex_replace('[^a-zA-Z0-9# ]', '') | upper) %}
-                  {% set suffix = uid[-4:] if (uid | length) >= 4 else uid %}
-                  {% set display = ascii if (ascii | length) > 0 else ('TASK ' ~ suffix) %}
+                  {% set name = (item.summary | default('') | string | regex_replace('[\ud800-\udfff]', '')) %}
                   {% if not ns.first %},{% endif %}
                   {% set ns.first = false %}
                   {
                     "id": {{ uid | tojson }},
-                    "name": {{ display | tojson }},
-                    "display_name": {{ display | tojson }},
+                    "name": {{ name | tojson }},
+                    "display_name": {{ name | tojson }},
+                    "status": {{ status | tojson }},
                     "duration": 25,
                     "spent_today_sec": {{ stats.get(uid, 0) | int }}
                   }
@@ -248,6 +271,10 @@ focus_dial_send_ticktick_focus_tasks:
                   data:
                     message: "Focus Dial: Failed to complete TickTick task {{ payload.task_id }}: {{ complete_response.error | default('Unknown') }}"
                     level: error
+
+            # 回写后立刻刷新并重新推送到设备：任务从“待办”消失/进入“已完成”
+            - delay: "00:00:01"
+            - service: script.focus_dial_send_ticktick_focus_tasks
       default: []
 ```
 

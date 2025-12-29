@@ -1,5 +1,9 @@
 #include "StateMachine.h"
 #include "Controllers.h"
+#include <ArduinoJson.h>
+
+// 静态成员初始化 / Static member initialization
+bool IdleState::bootCompleted = false;
 
 IdleState::IdleState() : defaultDuration(0), lastActivity(0)
 {
@@ -25,6 +29,22 @@ void IdleState::enter()
 {
     Serial.println("Entering Idle State / 进入空闲状态");
     ledController.setBreath(BLUE, -1, false, 5);
+
+    // 首次启动完成后，发送 device_online 事件请求 HA 推送任务
+    // On first boot, send device_online event to request HA to push tasks
+    if (!bootCompleted && networkController.isWiFiConnected())
+    {
+        bootCompleted = true;
+        Serial.println("Idle State: First boot - sending device_online event / 首次启动，发送上线事件");
+
+        DynamicJsonDocument doc(256);
+        doc["event"] = "device_online";
+        doc["action"] = "request_tasks";
+
+        String payload;
+        serializeJson(doc, payload);
+        networkController.sendWebhookPayload(payload);
+    }
 
     // Register state-specific handlers / 注册状态回调
     inputController.onPressHandler([this]()

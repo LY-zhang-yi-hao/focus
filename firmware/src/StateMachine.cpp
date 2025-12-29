@@ -5,15 +5,17 @@ StateMachine stateMachine;
 
 // Initialize static states / 初始化静态状态实例
 AdjustState StateMachine::adjustState;
-SleepState StateMachine::sleepState;
 DoneState StateMachine::doneState;
+DurationSelectState StateMachine::durationSelectState;
 IdleState StateMachine::idleState;
 PausedState StateMachine::pausedState;
 ProvisionState StateMachine::provisionState;
 ResetState StateMachine::resetState;
+SleepState StateMachine::sleepState;
 StartupState StateMachine::startupState;
 TaskCompletePromptState StateMachine::taskCompletePromptState;
 TaskListState StateMachine::taskListState;
+TaskListViewState StateMachine::taskListViewState;
 TimerState StateMachine::timerState;
 
 StateMachine::StateMachine() {

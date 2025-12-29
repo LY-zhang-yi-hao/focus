@@ -3,17 +3,6 @@
 #include "states/TaskCompletePromptState.h"
 #include <ArduinoJson.h>
 
-// 判断字符串是否为可打印 ASCII（用于在小字库下避免中文渲染为空白）/ ASCII printable check
-static bool isAsciiPrintable(const String& text) {
-    for (size_t i = 0; i < text.length(); i++) {
-        unsigned char c = static_cast<unsigned char>(text[i]);
-        if (c < 0x20 || c > 0x7E) {
-            return false;
-        }
-    }
-    return true;
-}
-
 TaskCompletePromptState::TaskCompletePromptState()
     : elapsedSeconds(0),
       countTime(false),
@@ -67,6 +56,9 @@ void TaskCompletePromptState::enter()
         doc["task_display_name"] = taskDisplayName;
         doc["mark_task_done"] = markDoneSelected;
         doc["end_type"] = isCanceled ? "canceled" : "completed";
+        // 添加专注时长，用于 HA 统计
+        doc["elapsed_seconds"] = elapsedSeconds;
+        doc["count_time"] = countTime;
 
         String payload;
         serializeJson(doc, payload);
@@ -88,21 +80,17 @@ void TaskCompletePromptState::update()
     ledController.update();
     networkController.update();
 
-    // 优先显示 display_name（ASCII/拼音/简称），否则回退 name；若仍非 ASCII 则显示兜底标识 / Prefer display_name
-    String nameToShow = taskDisplayName;
+    // 优先显示中文任务名（taskName），displayName 仅做兼容兜底
+    String nameToShow = taskName;
     if (nameToShow.isEmpty()) {
-        nameToShow = taskName;
+        nameToShow = taskDisplayName;
     }
-    if (nameToShow.isEmpty() || !isAsciiPrintable(nameToShow)) {
+    if (nameToShow.isEmpty()) {
         String suffix = taskId;
         if (suffix.length() > 4) {
             suffix = suffix.substring(suffix.length() - 4);
         }
-        if (!suffix.isEmpty() && isAsciiPrintable(suffix)) {
-            nameToShow = "TASK " + suffix;
-        } else {
-            nameToShow = "TASK";
-        }
+        nameToShow = suffix.isEmpty() ? "未命名任务" : ("任务 " + suffix);
     }
 
     displayController.drawTaskCompletePromptScreen(nameToShow, markDoneSelected, isCanceled);

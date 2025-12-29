@@ -1,0 +1,4 @@
+push_tasks:
+  name: 推送任务到设备
+  description: 立即从 TickTick（todo 实体）刷新任务列表，并推送到 Focus Dial 设备（同时包含待办/已完成）。
+

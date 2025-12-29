@@ -4,6 +4,7 @@
 #include "State.h"
 #include "states/AdjustState.h"
 #include "states/DoneState.h"
+#include "states/DurationSelectState.h"
 #include "states/IdleState.h"
 #include "states/PausedState.h"
 #include "states/ProvisionState.h"
@@ -12,6 +13,7 @@
 #include "states/StartupState.h"
 #include "states/TaskCompletePromptState.h"
 #include "states/TaskListState.h"
+#include "states/TaskListViewState.h"
 #include "states/TimerState.h"
 
 class StateMachine {
@@ -25,15 +27,17 @@ public:
 
     // Static states / 静态状态对象
     static AdjustState adjustState;
-    static SleepState sleepState;
     static DoneState doneState;
+    static DurationSelectState durationSelectState;
     static IdleState idleState;
     static PausedState pausedState;
     static ProvisionState provisionState;
     static ResetState resetState;
+    static SleepState sleepState;
     static StartupState startupState;
     static TaskCompletePromptState taskCompletePromptState;
     static TaskListState taskListState;
+    static TaskListViewState taskListViewState;
     static TimerState timerState;
 
 private:

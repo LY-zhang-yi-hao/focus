@@ -78,7 +78,7 @@ void TimerState::enter()
 
     inputController.onDoublePressHandler([this]()
                                          {
-                                             Serial.println("Timer State: Button Double Pressed / 计时状态：双击");
+                                             Serial.println("Timer State: Double press - cancel / 计时状态：双击取消");
 
                                              // Update elapsed time / 更新已用时间
                                              this->elapsedTime = (millis() - this->startTime) / 1000;
@@ -100,7 +100,7 @@ void TimerState::enter()
 
                                              displayController.showCancel();
 
-                                             // 如果存在任务，则进入“是否完成任务”确认 / If task exists, ask whether to mark done
+                                             // 如果存在任务，则进入"是否完成任务"确认 / If task exists, ask whether to mark done
                                              if (!this->taskId.isEmpty())
                                              {
                                                  StateMachine::taskCompletePromptState.setContext(
@@ -118,6 +118,70 @@ void TimerState::enter()
                                                  stateMachine.changeState(&StateMachine::idleState); // Transition to IdleState / 返回空闲
                                              }
                                          });
+
+    // 旋转查看任务列表 / Rotate to view task list
+    inputController.onEncoderRotateHandler([this](int delta)
+                                           {
+                                               Serial.println("Timer State: Encoder rotate - view task list / 计时状态：旋转查看任务列表");
+
+                                               // 更新已用时间（用于返回时恢复）/ Update elapsed time for restoration
+                                               this->elapsedTime = (millis() - this->startTime) / 1000;
+
+                                               // 进入只读任务列表查看状态（不暂停计时、不触发webhook）
+                                               // Enter read-only task list view (no pause, no webhook)
+                                               StateMachine::taskListViewState.setTimerContext(
+                                                   this->duration,
+                                                   this->elapsedTime,
+                                                   this->taskId,
+                                                   this->taskName,
+                                                   this->sessionId,
+                                                   this->taskDisplayName);
+                                               stateMachine.changeState(&StateMachine::taskListViewState);
+                                           });
+
+    // 长按也可以取消计时（保留作为备用）/ Long press also cancels timer (kept as backup)
+    inputController.onLongPressHandler([this]()
+                                       {
+                                           Serial.println("Timer State: Long press - cancel / 计时状态：长按取消");
+
+                                           // Update elapsed time / 更新已用时间
+                                           this->elapsedTime = (millis() - this->startTime) / 1000;
+
+                                           // Send 'Stop' webhook (canceled) / 发送取消事件
+                                           DynamicJsonDocument doc(768);
+                                           doc["action"] = "stop";
+                                           doc["event"] = "focus_canceled";
+                                           doc["session_id"] = this->sessionId;
+                                           doc["task_id"] = this->taskId;
+                                           doc["task_name"] = this->taskName;
+                                           doc["task_display_name"] = this->taskDisplayName;
+                                           doc["elapsed_seconds"] = (uint32_t)this->elapsedTime;
+                                           doc["count_time"] = false;
+
+                                           String payload;
+                                           serializeJson(doc, payload);
+                                           networkController.sendWebhookPayload(payload);
+
+                                           displayController.showCancel();
+
+                                           // 如果存在任务，则进入"是否完成任务"确认 / If task exists, ask whether to mark done
+                                           if (!this->taskId.isEmpty())
+                                           {
+                                               StateMachine::taskCompletePromptState.setContext(
+                                                   this->taskId,
+                                                   this->taskName,
+                                                   this->sessionId,
+                                                   (uint32_t)this->elapsedTime,
+                                                   false,
+                                                   true,
+                                                   this->taskDisplayName);
+                                               stateMachine.changeState(&StateMachine::taskCompletePromptState);
+                                           }
+                                           else
+                                           {
+                                               stateMachine.changeState(&StateMachine::idleState); // Transition to IdleState / 返回空闲
+                                           }
+                                       });
 
     networkController.startBluetooth();
 

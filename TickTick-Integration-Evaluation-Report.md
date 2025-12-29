@@ -14,7 +14,7 @@
 |---------|------|--------|------|
 | **TickTick OAuth 认证** | ✅ 完成 | 100% | 已成功认证并创建 todo 实体 |
 | **HA 推送任务列表到设备** | ✅ 完成 | 95% | 代码已落地，待实际测试 |
-| **设备显示中文任务名** | ⚠️ 部分完成 | 70% | 有 ASCII 兜底机制，但体验欠佳 |
+| **设备显示中文任务名** | ✅ 完成 | 100% | 已集成中文点阵字库（wqy12 gb2312），OLED 可原生显示中文，UI 全中文 |
 | **选择任务并开始计时** | ✅ 完成 | 100% | TaskListState + TimerState 已实现 |
 | **计时完成选择是否完成任务** | ✅ 完成 | 100% | TaskCompletePromptState 已实现 |
 | **今日累计时长记录** | ✅ 完成 | 100% | HA 自动化已实现累计逻辑 |
@@ -62,11 +62,10 @@ TickTick → HA (todo.get_items) → 脚本组装 JSON → POST /api/tasklist
 
 浮浮酱注意到主人做了很多细致的容错处理喵～
 
-1. **中文字体兜底机制**（DisplayController.cpp:422-488）：
-   - 优先显示 `displayName`（HA 下发的 ASCII/拼音）
-   - 回退到 `name`（任务原名）
-   - 若非 ASCII 则显示 `TASK xxxx`（任务 ID 后 4 位）
-   - 最终兜底 `TASK 1/2/3`（序号）
+1. **中文字体渲染 + UTF-8 截断 + 空值兜底**：
+   - 使用 `U8g2_for_Adafruit_GFX` + `u8g2_font_wqy12_t_gb2312` 渲染中文
+   - `utf8Truncate()` 避免中文被截断成乱码
+   - `name` 为空时兜底显示“未命名任务/任务 xxxx”
 
 2. **JSON 解析容错**（TaskListState.cpp:121-127）：
    - 使用 `DynamicJsonDocument(8192)` 支持较多任务
@@ -94,7 +93,12 @@ TickTick → HA (todo.get_items) → 脚本组装 JSON → POST /api/tasklist
 
 ### 3.1 中文字体显示问题 (#￣～￣#)
 
-#### 问题现象
+#### 更新（2025-12-29）
+
+- ✅ 已落地方案 A：固件引入 `U8g2_for_Adafruit_GFX` + `u8g2_font_wqy12_t_gb2312`，OLED 可原生显示中文任务名与中文界面文案。
+- ✅ 已移除“非 ASCII → TASK xxxx”的兜底策略；`displayName` 保留为兼容字段，但不再要求拼音/ASCII。
+
+#### （历史）问题现象
 
 当前固件使用的字体（`Picopixel` 和 `Org_01`）**不包含中文字形**，导致：
 - TickTick 任务名如 "🍅学习 Rust" 会显示为 `TASK xxxx`
@@ -140,7 +144,7 @@ void DisplayController::drawTaskListScreen(...) {
 
 ---
 
-**方案 B：优化 HA 脚本的 displayName 生成** (๑•̀ㅂ•́)
+**方案 B：优化 HA 脚本的 displayName 生成（已不推荐）** (๑•̀ㅂ•́)
 
 如果不想改固件，可以在 HA 侧优化 ASCII 名称生成：
 
@@ -211,9 +215,9 @@ String getTaskIcon(const String& taskName) {
 
 **浮浮酱的最终推荐**： ฅ'ω'ฅ
 
-1. **短期（1 周内）**：先用方案 B 优化 `displayName` 生成，确保基础可用
-2. **中期（2-4 周）**：迁移到 `U8g2` + 中文字库（方案 A），提升用户体验
-3. **长期**：考虑支持用户自定义任务图标（方案 C），增强个性化
+1. ✅ **已完成**：迁移到 `U8g2_for_Adafruit_GFX` + 中文字库（方案 A），OLED 原生中文 + UI 全中文
+2. ✅ **已完成**：待办/已完成双列表 + YES 回写后自动刷新推送（方案 2 稳）
+3. **可选增强**：任务图标（方案 C）与 UI 细节优化
 
 ---
 

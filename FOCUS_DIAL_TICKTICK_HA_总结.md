@@ -106,15 +106,16 @@ curl --max-time 5 -X POST "http://192.168.15.166/api/tasklist" \
   -H "Content-Type: application/json" \
   -d '{
     "tasks":[
-      {"id":"ticktick:1","name":"写周报 #focus","display_name":"XZB #focus","duration":25,"spent_today_sec":120}
+      {"id":"ticktick:1","name":"学习 Rust","display_name":"学习 Rust","status":"needs_action","duration":25,"spent_today_sec":120}
     ]
   }'
 ```
 
 字段说明：
 - `id`：任务唯一 ID（建议用 TickTick task_id 或前缀化 `ticktick:...`）
-- `name`：任务名称（注意中文显示问题见第 6 节）
-- `display_name`：设备显示名（可选，建议 ASCII/拼音/简称）。设备端会优先显示该字段，用于解决中文标题在设备端可能显示为空白的问题。
+- `name`：任务名称（固件已支持中文字体，可直接显示中文）
+- `display_name`：设备显示名（可选，兼容字段）。通常可与 `name` 相同，不再要求拼音/ASCII。
+- `status`：任务状态：`needs_action`（待办）/ `completed`（已完成），用于设备端双击切换查看两类列表。
 - `duration`：建议专注时长（分钟）
 - `spent_today_sec`：今日累计专注秒数（由 HA 统计后下发，设备只负责展示）
 
@@ -135,7 +136,12 @@ Focus Dial 会向你在配网页面填写的 `Webhook URL` 发送 `POST applicat
 
 ---
 
-## 6. 中文任务名显示问题（蓝条/无文字）——两种方案对比与推荐
+## 6. 中文任务名显示问题（蓝条/无文字）——更新与结论
+
+### 6.0 更新（2025-12-29）
+
+- ✅ 已实现“设备端引入中文字体/点阵渲染”：固件集成 `U8g2_for_Adafruit_GFX` + `u8g2_font_wqy12_t_gb2312`，OLED 可原生显示中文任务名与全中文界面文案。
+- ✅ `display_name` 仅保留为兼容字段，**不再推荐**依赖拼音/ASCII。
 
 ### 6.1 现象描述（你现场观察）
 
@@ -155,7 +161,7 @@ curl --max-time 5 -X POST "http://192.168.15.166/api/tasklist" \
 - 若能显示 `TEST #focus`：基本确认“中文字体不支持”是主因  
 - 若仍不显示：再检查 `/api/status` 是否 `tasklist_loaded:true`，以及 HA 下发 JSON 是否有效（第 7 节排查）
 
-### 6.3 方案 1：`display_name` / 拼音简称（推荐）
+### 6.3 方案 1：`display_name` / 拼音简称（已不推荐，仅兼容保留）
 
 **思路**：HA 下发任务时同时提供一个“设备友好显示名”（ASCII/英文/拼音/简称），设备优先显示 `display_name`，缺省再回退到 `name`。
 
@@ -174,7 +180,7 @@ curl --max-time 5 -X POST "http://192.168.15.166/api/tasklist" \
 
 > 这是当前最“工程可控”的路径：先把功能跑通，再决定是否值得上中文字体。
 
-### 6.4 方案 2：设备端引入中文字体/点阵渲染（可选）
+### 6.4 方案 2：设备端引入中文字体/点阵渲染（已落地）
 
 **思路**：在固件中加入可渲染中文的字体（点阵字库或更换显示库/字体引擎），直接显示 `name` 的中文。
 
@@ -191,8 +197,7 @@ curl --max-time 5 -X POST "http://192.168.15.166/api/tasklist" \
 
 ### 6.5 推荐结论
 
-- **优先推荐方案 1（`display_name`）**：最快、最稳、维护成本最低。  
-- 方案 2 作为“体验升级项”，等联动全链路跑通后再评估投入产出。
+- **当前推荐：方案 2（已落地）**。设备端直接显示 `name` 的中文，体验更一致；待办/已完成也能在设备端切换查看。
 
 ---
 
@@ -211,7 +216,9 @@ curl --max-time 5 -X POST "http://192.168.15.166/api/tasklist" \
 
 ### 7.2 任务列表出现高亮条但无文字
 
-高概率：中文字体不支持。先用第 6.2 的英文任务验证，再决定走方案 1/2。
+若仍出现“高亮条但无文字”：
+1) 确认已烧录本次更新后的固件（已集成中文字库）
+2) 确认下发 JSON 为合法 UTF-8（避免异常转义/非法字符）
 
 ### 7.3 HA 下发任务为空（设备显示 NO TASKS）
 

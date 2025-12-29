@@ -8,7 +8,10 @@
 struct FocusTask {
     String id;                 // 任务 ID（由 HA 生成/透传，可为复合 ID）/ Task ID
     String name;               // 任务名称 / Task name
-    String displayName;        // 设备显示名（可选，ASCII/拼音/简称），用于中文不可渲染时替代显示 / Optional device display name
+    String displayName;        // 设备显示名（可选，兼容字段）/ Optional device display name (compat)
+    bool isCompleted = false;  // 是否已完成（用于区分“待办/已完成”列表）/ Completed flag
     int estimatedDuration = 25;     // 建议单次番茄时长（分钟）/ Recommended session duration (min)
     uint32_t spentTodaySeconds = 0; // 今日累计专注用时（秒）/ Spent today (sec)
+    String completedAt;             // 完成日期（MM.DD，仅已完成任务有效）/ Completed date (MM.DD)
+    uint32_t completedSpentSeconds = 0; // 完成当天累计专注用时（秒，仅已完成任务有效）/ Spent on completed day (sec)
 };
