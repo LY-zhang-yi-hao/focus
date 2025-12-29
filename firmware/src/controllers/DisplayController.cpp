@@ -38,6 +38,44 @@ static String utf8Truncate(const String& text, size_t maxChars, bool addEllipsis
     return out;
 }
 
+static void setupChineseFont(U8G2_FOR_ADAFRUIT_GFX& u8g2, uint8_t foregroundColor) {
+    u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+    u8g2.setFontMode(1);               // 透明背景
+    u8g2.setForegroundColor(foregroundColor);
+    u8g2.setBackgroundColor(0);
+}
+
+static void drawTaskListScrollBar(Adafruit_SSD1306& oled, int x, int y, int w, int h, int displayOffset, int total, int visible) {
+    if (total <= 0 || visible <= 0 || h <= 0 || w <= 0) {
+        return;
+    }
+
+    // 轨道
+    oled.drawRoundRect(x, y, w, h, 2, 1);
+
+    if (total <= visible) {
+        // 不需要滚动，滚动块占满
+        oled.fillRoundRect(x + 1, y + 1, w - 2, h - 2, 1, 1);
+        return;
+    }
+
+    const int innerH = h - 2;
+    const int innerY = y + 1;
+    const int maxOffset = total - visible;
+
+    int knobH = (innerH * visible) / total;
+    if (knobH < 6) knobH = 6;
+    if (knobH > innerH) knobH = innerH;
+
+    const int travel = innerH - knobH;
+    int knobY = innerY;
+    if (travel > 0 && maxOffset > 0) {
+        knobY = innerY + (travel * displayOffset) / maxOffset;
+    }
+
+    oled.fillRoundRect(x + 1, knobY, w - 2, knobH, 1, 1);
+}
+
 DisplayController::DisplayController(uint8_t oledWidth, uint8_t oledHeight, uint8_t oledAddress)
     : oled(oledWidth, oledHeight, &Wire, -1), animation(&oled) {}
 
@@ -479,33 +517,90 @@ void DisplayController::drawTaskListScreen(const std::vector<FocusTask>& tasks, 
 
     oled.clearDisplay();
 
-    // 标题
-    u8g2Fonts.setFont(u8g2_font_wqy12_t_gb2312);
-    u8g2Fonts.setFontMode(1);
-    u8g2Fonts.setForegroundColor(1);
-    u8g2Fonts.setBackgroundColor(0);
-    u8g2Fonts.setCursor(showingCompleted ? 46 : 40, 12);
-    u8g2Fonts.print(showingCompleted ? "已完成" : "待办任务");
+    // ===== Header（分段控件：待办/已完成）=====
+    setupChineseFont(u8g2Fonts, 1);
+
+    const int segX = 25;
+    const int segY = 0;
+    const int segW = 78;
+    const int segH = 14;
+    const int segR = 4;
+    const int segHalfW = segW / 2;
+
+    oled.drawRoundRect(segX, segY, segW, segH, segR, 1);
+    oled.drawLine(segX + segHalfW, segY + 2, segX + segHalfW, segY + segH - 3, 1);
+
+    if (showingCompleted) {
+        oled.fillRoundRect(segX + segHalfW + 1, segY + 1, segHalfW - 2, segH - 2, segR - 1, 1);
+    } else {
+        oled.fillRoundRect(segX + 1, segY + 1, segHalfW - 2, segH - 2, segR - 1, 1);
+    }
+
+    const String leftLabel = "待办";
+    const String rightLabel = "已完成";
+    const int16_t labelY = 12;
+    const int16_t leftCenterX = segX + (segHalfW / 2);
+    const int16_t rightCenterX = segX + segHalfW + (segHalfW / 2);
+
+    u8g2Fonts.setForegroundColor(showingCompleted ? 1 : 0);
+    int16_t leftW = u8g2Fonts.getUTF8Width(leftLabel.c_str());
+    u8g2Fonts.setCursor(leftCenterX - leftW / 2, labelY);
+    u8g2Fonts.print(leftLabel);
+
+    u8g2Fonts.setForegroundColor(showingCompleted ? 0 : 1);
+    int16_t rightW = u8g2Fonts.getUTF8Width(rightLabel.c_str());
+    u8g2Fonts.setCursor(rightCenterX - rightW / 2, labelY);
+    u8g2Fonts.print(rightLabel);
+
+    // 右上角：索引计数（Picopixel）
+    if (!tasks.empty()) {
+        char countBuf[12];
+        int safeIndexForCount = selectedIndex;
+        if (safeIndexForCount < 0) safeIndexForCount = 0;
+        if (safeIndexForCount >= (int)tasks.size()) safeIndexForCount = (int)tasks.size() - 1;
+        snprintf(countBuf, sizeof(countBuf), "%d/%d", safeIndexForCount + 1, (int)tasks.size());
+
+        oled.setFont(&Picopixel);
+        oled.setTextSize(1);
+        oled.setTextColor(1);
+        const int countWidthApprox = (int)strlen(countBuf) * 4;
+        oled.setCursor(126 - countWidthApprox, 9);
+        oled.print(countBuf);
+    }
 
     // 空列表提示
     if (tasks.empty()) {
-        u8g2Fonts.setFont(u8g2_font_wqy12_t_gb2312);
-        u8g2Fonts.setFontMode(1);
-        u8g2Fonts.setForegroundColor(1);
-        u8g2Fonts.setCursor(34, 34);
-        u8g2Fonts.print(showingCompleted ? "暂无已完成" : "暂无待办");
+        setupChineseFont(u8g2Fonts, 1);
 
-        u8g2Fonts.setFont(u8g2_font_wqy12_t_gb2312);
-        u8g2Fonts.setFontMode(1);
-        u8g2Fonts.setCursor(16, 52);
-        u8g2Fonts.print(showingCompleted ? "完成后将自动同步" : "请从家庭助手推送");
+        oled.drawRoundRect(8, 20, 112, 36, 6, 1);
+
+        const String title = showingCompleted ? "暂无已完成" : "暂无待办";
+        const String sub = showingCompleted ? "完成后将自动同步" : "请从家庭助手推送";
+
+        int16_t titleW = u8g2Fonts.getUTF8Width(title.c_str());
+        int16_t subW = u8g2Fonts.getUTF8Width(sub.c_str());
+        int16_t titleX = (128 - titleW) / 2;
+        int16_t subX = (128 - subW) / 2;
+
+        u8g2Fonts.setCursor(titleX < 0 ? 0 : titleX, 38);
+        u8g2Fonts.print(title);
+        u8g2Fonts.setCursor(subX < 0 ? 0 : subX, 52);
+        u8g2Fonts.print(sub);
         oled.display();
         return;
     }
 
-    const int START_Y = 30;      // 任务行基线起点（配合 wqy12）
-    const int LINE_HEIGHT = 16;  // 行高
+    // ===== List（卡片式列表）=====
     const int MAX_VISIBLE = 2;
+    const int CARD_X = 4;
+    const int CARD_W = 116;
+    const int CARD_H = 16;
+    const int CARD_GAP = 4;
+    const int CARD_R = 4;
+    const int LIST_TOP = 16;
+    const int TEXT_X = CARD_X + 14;
+    const int TEXT_BASELINE_OFFSET = 12;  // 配合 wqy12
+    const int RIGHT_LABEL_PADDING = 8;
 
     // 保护选中索引
     if (selectedIndex < 0) selectedIndex = 0;
@@ -513,16 +608,20 @@ void DisplayController::drawTaskListScreen(const std::vector<FocusTask>& tasks, 
 
     for (int i = 0; i < MAX_VISIBLE && (displayOffset + i) < (int)tasks.size(); i++) {
         int taskIndex = displayOffset + i;
-        int yPos = START_Y + (i * LINE_HEIGHT);
+        const bool isSelected = (taskIndex == selectedIndex);
+        const int cardY = LIST_TOP + (i * (CARD_H + CARD_GAP));
+        const int textY = cardY + TEXT_BASELINE_OFFSET;
 
-        if (taskIndex == selectedIndex) {
-            oled.fillRect(0, yPos - 13, 128, LINE_HEIGHT, 1);
-            u8g2Fonts.setForegroundColor(0);
-            u8g2Fonts.setBackgroundColor(1);
+        if (isSelected) {
+            oled.fillRoundRect(CARD_X, cardY, CARD_W, CARD_H, CARD_R, 1);
         } else {
-            u8g2Fonts.setForegroundColor(1);
-            u8g2Fonts.setBackgroundColor(0);
+            oled.drawRoundRect(CARD_X, cardY, CARD_W, CARD_H, CARD_R, 1);
         }
+
+        // 选中指示箭头
+        const int arrowX = CARD_X + 6;
+        const int arrowY = cardY + (CARD_H / 2);
+        oled.fillTriangle(arrowX, arrowY, arrowX + 4, arrowY - 3, arrowX + 4, arrowY + 3, isSelected ? 0 : 1);
 
         // 任务名（UTF-8 安全截断）
         // 以 name 为主（支持中文），display_name 仅做兼容兜底
@@ -539,56 +638,79 @@ void DisplayController::drawTaskListScreen(const std::vector<FocusTask>& tasks, 
             name = suffix.isEmpty() ? "未命名任务" : ("任务 " + suffix);
         }
 
-        name = utf8Truncate(name, 8, true);
+        name = utf8Truncate(name, 7, true);
 
-        u8g2Fonts.setFont(u8g2_font_wqy12_t_gb2312);
-        u8g2Fonts.setFontMode(1);
-        u8g2Fonts.setCursor(4, yPos);
+        setupChineseFont(u8g2Fonts, isSelected ? 0 : 1);
+        u8g2Fonts.setCursor(TEXT_X, textY);
         u8g2Fonts.print(name);
+
+        // 右侧信息（待办：建议时长；已完成：完成日期）
+        oled.setFont(&Picopixel);
+        oled.setTextSize(1);
+        oled.setTextColor(isSelected ? 0 : 1);
+
+        char rightLabel[12] = {0};
+        if (showingCompleted) {
+            if (!tasks[taskIndex].completedAt.isEmpty()) {
+                snprintf(rightLabel, sizeof(rightLabel), "%s", tasks[taskIndex].completedAt.c_str());
+            } else {
+                snprintf(rightLabel, sizeof(rightLabel), "DONE");
+            }
+        } else {
+            const int minutes = tasks[taskIndex].estimatedDuration > 0 ? tasks[taskIndex].estimatedDuration : 25;
+            if (minutes >= 60 && minutes % 60 == 0) {
+                snprintf(rightLabel, sizeof(rightLabel), "%dH", minutes / 60);
+            } else {
+                snprintf(rightLabel, sizeof(rightLabel), "%dM", minutes);
+            }
+        }
+
+        const int rightWApprox = (int)strlen(rightLabel) * 4;
+        const int rightX = (CARD_X + CARD_W) - RIGHT_LABEL_PADDING - rightWApprox;
+        oled.setCursor(rightX, cardY + 11);
+        oled.print(rightLabel);
     }
 
-    // 底部信息
+    // ===== Footer（信息条）=====
     const FocusTask& selectedTask = tasks[selectedIndex];
 
-    char info[64];
+    char info[32] = {0};
     if (showingCompleted) {
-        // 已完成：显示完成日期 + 完成当天累计专注（分钟四舍五入）
         uint32_t displaySeconds = selectedTask.completedSpentSeconds;
         if (displaySeconds == 0) {
-            // 兼容旧 payload：没有 completed_spent_sec 时，兜底使用 spent_today_sec
             displaySeconds = selectedTask.spentTodaySeconds;
         }
-        uint32_t roundedMin = (displaySeconds + 30) / 60;
-
+        const uint32_t roundedMin = (displaySeconds + 30) / 60;
         if (!selectedTask.completedAt.isEmpty() && roundedMin > 0) {
-            snprintf(info, sizeof(info), "%s,专注%lumin", selectedTask.completedAt.c_str(), (unsigned long)roundedMin);
+            snprintf(info, sizeof(info), "%s %luM", selectedTask.completedAt.c_str(), (unsigned long)roundedMin);
         } else if (!selectedTask.completedAt.isEmpty()) {
-            snprintf(info, sizeof(info), "%s,已完成", selectedTask.completedAt.c_str());
+            snprintf(info, sizeof(info), "%s DONE", selectedTask.completedAt.c_str());
         } else if (roundedMin > 0) {
-            snprintf(info, sizeof(info), "专注%lumin", (unsigned long)roundedMin);
+            snprintf(info, sizeof(info), "DONE %luM", (unsigned long)roundedMin);
         } else {
-            snprintf(info, sizeof(info), "已完成");
+            snprintf(info, sizeof(info), "DONE");
         }
     } else {
-        // 待办：显示今日累计
-        uint32_t todayMin = selectedTask.spentTodaySeconds / 60;
-        snprintf(info, sizeof(info), "今日已专注 %lumin", (unsigned long)todayMin);
+        const uint32_t todayMin = selectedTask.spentTodaySeconds / 60;
+        snprintf(info, sizeof(info), "TODAY %luM", (unsigned long)todayMin);
     }
 
-    u8g2Fonts.setFont(u8g2_font_wqy12_t_gb2312);
-    u8g2Fonts.setFontMode(1);
-    u8g2Fonts.setForegroundColor(1);
-    u8g2Fonts.setBackgroundColor(0);
-    u8g2Fonts.setCursor(16, 63);
-    u8g2Fonts.print(info);
+    const int barX = 4;
+    const int barY = 54;
+    const int barW = 120;
+    const int barH = 10;
+    oled.drawRoundRect(barX, barY, barW, barH, 3, 1);
 
-    // 滚动提示
-    if (displayOffset > 0) {
-        oled.fillTriangle(124, 14, 120, 18, 128, 18, 1);
-    }
-    if (displayOffset + MAX_VISIBLE < (int)tasks.size()) {
-        oled.fillTriangle(124, 62, 120, 58, 128, 58, 1);
-    }
+    oled.setFont(&Picopixel);
+    oled.setTextSize(1);
+    oled.setTextColor(1);
+    oled.setCursor(barX + 6, 62);
+    oled.print(info);
+
+    // ===== Scrollbar =====
+    const int total = (int)tasks.size();
+    const int visible = (total < MAX_VISIBLE) ? total : MAX_VISIBLE;
+    drawTaskListScrollBar(oled, 123, 16, 4, 36, displayOffset, total, visible);
 
     oled.display();
 }
@@ -788,31 +910,82 @@ void DisplayController::drawTaskListViewScreen(const std::vector<FocusTask>& tas
 
     oled.clearDisplay();
 
-    // 标题（带"查看中"标记）
-    u8g2Fonts.setFont(u8g2_font_wqy12_t_gb2312);
-    u8g2Fonts.setFontMode(1);
-    u8g2Fonts.setForegroundColor(1);
-    u8g2Fonts.setBackgroundColor(0);
+    // ===== Header（VIEW 徽标 + 分段控件）=====
+    setupChineseFont(u8g2Fonts, 1);
 
-    // 显示"查看中"标记
-    u8g2Fonts.setCursor(4, 12);
-    u8g2Fonts.print("查看");
-    u8g2Fonts.setCursor(showingCompleted ? 46 : 40, 12);
-    u8g2Fonts.print(showingCompleted ? "已完成" : "待办任务");
+    // VIEW 徽标（Picopixel）
+    oled.fillRoundRect(4, 0, 22, 14, 4, 1);
+    oled.setFont(&Picopixel);
+    oled.setTextSize(1);
+    oled.setTextColor(0);
+    oled.setCursor(7, 9);
+    oled.print("VIEW");
+
+    // 分段控件（为左侧 VIEW 徽标留出空间）
+    const int segX = 27;
+    const int segY = 0;
+    const int segW = 74;
+    const int segH = 14;
+    const int segR = 4;
+    const int segHalfW = segW / 2;
+
+    oled.drawRoundRect(segX, segY, segW, segH, segR, 1);
+    oled.drawLine(segX + segHalfW, segY + 2, segX + segHalfW, segY + segH - 3, 1);
+
+    if (showingCompleted) {
+        oled.fillRoundRect(segX + segHalfW + 1, segY + 1, segHalfW - 2, segH - 2, segR - 1, 1);
+    } else {
+        oled.fillRoundRect(segX + 1, segY + 1, segHalfW - 2, segH - 2, segR - 1, 1);
+    }
+
+    const String leftLabel = "待办";
+    const String rightLabel = "已完成";
+    const int16_t labelY = 12;
+    const int16_t leftCenterX = segX + (segHalfW / 2);
+    const int16_t rightCenterX = segX + segHalfW + (segHalfW / 2);
+
+    u8g2Fonts.setForegroundColor(showingCompleted ? 1 : 0);
+    int16_t leftW = u8g2Fonts.getUTF8Width(leftLabel.c_str());
+    u8g2Fonts.setCursor(leftCenterX - leftW / 2, labelY);
+    u8g2Fonts.print(leftLabel);
+
+    u8g2Fonts.setForegroundColor(showingCompleted ? 0 : 1);
+    int16_t rightW = u8g2Fonts.getUTF8Width(rightLabel.c_str());
+    u8g2Fonts.setCursor(rightCenterX - rightW / 2, labelY);
+    u8g2Fonts.print(rightLabel);
 
     // 空列表提示
     if (tasks.empty()) {
-        u8g2Fonts.setCursor(34, 34);
-        u8g2Fonts.print(showingCompleted ? "暂无已完成" : "暂无待办");
-        u8g2Fonts.setCursor(24, 52);
-        u8g2Fonts.print("单击返回专注");
+        setupChineseFont(u8g2Fonts, 1);
+        oled.drawRoundRect(8, 20, 112, 36, 6, 1);
+
+        const String title = showingCompleted ? "暂无已完成" : "暂无待办";
+        int16_t titleW = u8g2Fonts.getUTF8Width(title.c_str());
+        int16_t titleX = (128 - titleW) / 2;
+        u8g2Fonts.setCursor(titleX < 0 ? 0 : titleX, 38);
+        u8g2Fonts.print(title);
+
+        oled.drawRoundRect(4, 54, 120, 10, 3, 1);
+        oled.setFont(&Picopixel);
+        oled.setTextSize(1);
+        oled.setTextColor(1);
+        oled.setCursor(38, 62);
+        oled.print("CLICK BACK");
         oled.display();
         return;
     }
 
-    const int START_Y = 30;
-    const int LINE_HEIGHT = 16;
+    // ===== List（卡片式列表）=====
     const int MAX_VISIBLE = 2;
+    const int CARD_X = 4;
+    const int CARD_W = 116;
+    const int CARD_H = 16;
+    const int CARD_GAP = 4;
+    const int CARD_R = 4;
+    const int LIST_TOP = 16;
+    const int TEXT_X = CARD_X + 14;
+    const int TEXT_BASELINE_OFFSET = 12;
+    const int RIGHT_LABEL_PADDING = 8;
 
     // 保护选中索引
     int safeIndex = selectedIndex;
@@ -821,16 +994,19 @@ void DisplayController::drawTaskListViewScreen(const std::vector<FocusTask>& tas
 
     for (int i = 0; i < MAX_VISIBLE && (displayOffset + i) < (int)tasks.size(); i++) {
         int taskIndex = displayOffset + i;
-        int yPos = START_Y + (i * LINE_HEIGHT);
+        const bool isSelected = (taskIndex == safeIndex);
+        const int cardY = LIST_TOP + (i * (CARD_H + CARD_GAP));
+        const int textY = cardY + TEXT_BASELINE_OFFSET;
 
-        if (taskIndex == safeIndex) {
-            oled.fillRect(0, yPos - 13, 128, LINE_HEIGHT, 1);
-            u8g2Fonts.setForegroundColor(0);
-            u8g2Fonts.setBackgroundColor(1);
+        if (isSelected) {
+            oled.fillRoundRect(CARD_X, cardY, CARD_W, CARD_H, CARD_R, 1);
         } else {
-            u8g2Fonts.setForegroundColor(1);
-            u8g2Fonts.setBackgroundColor(0);
+            oled.drawRoundRect(CARD_X, cardY, CARD_W, CARD_H, CARD_R, 1);
         }
+
+        const int arrowX = CARD_X + 6;
+        const int arrowY = cardY + (CARD_H / 2);
+        oled.fillTriangle(arrowX, arrowY, arrowX + 4, arrowY - 3, arrowX + 4, arrowY + 3, isSelected ? 0 : 1);
 
         // 任务名
         String name = tasks[taskIndex].name;
@@ -844,28 +1020,51 @@ void DisplayController::drawTaskListViewScreen(const std::vector<FocusTask>& tas
             }
             name = suffix.isEmpty() ? "未命名任务" : ("任务 " + suffix);
         }
-        name = utf8Truncate(name, 8, true);
+        name = utf8Truncate(name, 7, true);
 
-        u8g2Fonts.setFont(u8g2_font_wqy12_t_gb2312);
-        u8g2Fonts.setFontMode(1);
-        u8g2Fonts.setCursor(4, yPos);
+        setupChineseFont(u8g2Fonts, isSelected ? 0 : 1);
+        u8g2Fonts.setCursor(TEXT_X, textY);
         u8g2Fonts.print(name);
+
+        // 右侧信息（与选择页一致）
+        oled.setFont(&Picopixel);
+        oled.setTextSize(1);
+        oled.setTextColor(isSelected ? 0 : 1);
+
+        char rightLabel[12] = {0};
+        if (showingCompleted) {
+            if (!tasks[taskIndex].completedAt.isEmpty()) {
+                snprintf(rightLabel, sizeof(rightLabel), "%s", tasks[taskIndex].completedAt.c_str());
+            } else {
+                snprintf(rightLabel, sizeof(rightLabel), "DONE");
+            }
+        } else {
+            const int minutes = tasks[taskIndex].estimatedDuration > 0 ? tasks[taskIndex].estimatedDuration : 25;
+            if (minutes >= 60 && minutes % 60 == 0) {
+                snprintf(rightLabel, sizeof(rightLabel), "%dH", minutes / 60);
+            } else {
+                snprintf(rightLabel, sizeof(rightLabel), "%dM", minutes);
+            }
+        }
+
+        const int rightWApprox = (int)strlen(rightLabel) * 4;
+        const int rightX = (CARD_X + CARD_W) - RIGHT_LABEL_PADDING - rightWApprox;
+        oled.setCursor(rightX, cardY + 11);
+        oled.print(rightLabel);
     }
 
-    // 底部提示
-    u8g2Fonts.setForegroundColor(1);
-    u8g2Fonts.setBackgroundColor(0);
-    u8g2Fonts.setFont(u8g2_font_wqy12_t_gb2312);
-    u8g2Fonts.setCursor(24, 63);
-    u8g2Fonts.print("单击返回专注");
+    // ===== Footer（返回提示）=====
+    oled.drawRoundRect(4, 54, 120, 10, 3, 1);
+    oled.setFont(&Picopixel);
+    oled.setTextSize(1);
+    oled.setTextColor(1);
+    oled.setCursor(38, 62);
+    oled.print("CLICK BACK");
 
-    // 滚动提示
-    if (displayOffset > 0) {
-        oled.fillTriangle(124, 14, 120, 18, 128, 18, 1);
-    }
-    if (displayOffset + MAX_VISIBLE < (int)tasks.size()) {
-        oled.fillTriangle(124, 62, 120, 58, 128, 58, 1);
-    }
+    // ===== Scrollbar =====
+    const int total = (int)tasks.size();
+    const int visible = (total < MAX_VISIBLE) ? total : MAX_VISIBLE;
+    drawTaskListScrollBar(oled, 123, 16, 4, 36, displayOffset, total, visible);
 
     oled.display();
 }
