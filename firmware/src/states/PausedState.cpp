@@ -6,6 +6,7 @@ PausedState::PausedState()
     : duration(0),
       elapsedTime(0),
       pauseEnter(0),
+      taskProjectId(""),
       taskId(""),
       taskName(""),
       sessionId(""),
@@ -31,7 +32,8 @@ void PausedState::enter()
                                            taskId,
                                            taskName,
                                            sessionId,
-                                           taskDisplayName);
+                                           taskDisplayName,
+                                           taskProjectId);
                                        displayController.showTimerResume();
                                        stateMachine.changeState(&StateMachine::timerState); // Transition back to Timer State / 返回计时状态
                                    });
@@ -66,7 +68,8 @@ void PausedState::enter()
                                                      (uint32_t)elapsedTime,
                                                      false,
                                                      true,
-                                                     taskDisplayName);
+                                                     taskDisplayName,
+                                                     taskProjectId);
                                                  stateMachine.changeState(&StateMachine::taskCompletePromptState);
                                              }
                                              else
@@ -121,7 +124,8 @@ void PausedState::update()
                 (uint32_t)elapsedTime,
                 false,
                 true,
-                taskDisplayName);
+                taskDisplayName,
+                taskProjectId);
             stateMachine.changeState(&StateMachine::taskCompletePromptState);
         }
         else
@@ -142,7 +146,8 @@ void PausedState::setPause(int duration,
                            const String& taskId,
                            const String& taskName,
                            const String& sessionId,
-                           const String& taskDisplayName)
+                           const String& taskDisplayName,
+                           const String& taskProjectId)
 {
     this->duration = duration;
     this->elapsedTime = elapsedTime;
@@ -150,4 +155,5 @@ void PausedState::setPause(int duration,
     this->taskName = taskName;
     this->sessionId = sessionId;
     this->taskDisplayName = taskDisplayName;
+    this->taskProjectId = taskProjectId;
 }

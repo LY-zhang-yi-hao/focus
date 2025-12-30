@@ -17,12 +17,14 @@ void TaskCompletePromptState::setContext(const String& taskId,
                                          uint32_t elapsedSeconds,
                                          bool countTime,
                                          bool isCanceled,
-                                         const String& taskDisplayName)
+                                         const String& taskDisplayName,
+                                         const String& taskProjectId)
 {
     this->taskId = taskId;
     this->taskName = taskName;
     this->sessionId = sessionId;
     this->taskDisplayName = taskDisplayName;
+    this->taskProjectId = taskProjectId;
     this->elapsedSeconds = elapsedSeconds;
     this->countTime = countTime;
     this->isCanceled = isCanceled;
@@ -51,6 +53,7 @@ void TaskCompletePromptState::enter()
         doc["action"] = "focus_result";
         doc["event"] = "task_done_decision";
         doc["session_id"] = sessionId;
+        doc["project_id"] = taskProjectId;
         doc["task_id"] = taskId;
         doc["task_name"] = taskName;
         doc["task_display_name"] = taskDisplayName;

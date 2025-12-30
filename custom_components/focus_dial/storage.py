@@ -32,6 +32,7 @@ class FocusDialStats:
     total_seconds: int
     tasks_total: dict[str, dict[str, Any]]
     completed_tasks: list[dict[str, Any]]  # 已完成任务缓存（最近 N 个）
+    selected_project_id: str  # 当前选中的 TickTick Project（用于多项目切换记忆）
 
     @classmethod
     def default(cls) -> "FocusDialStats":
@@ -42,6 +43,7 @@ class FocusDialStats:
             total_seconds=0,
             tasks_total={},
             completed_tasks=[],
+            selected_project_id="",
         )
 
     @classmethod
@@ -56,6 +58,7 @@ class FocusDialStats:
             total_seconds=int(data.get("total_seconds") or 0),
             tasks_total=dict(data.get("tasks_total") or {}),
             completed_tasks=list(data.get("completed_tasks") or []),
+            selected_project_id=str(data.get("selected_project_id") or ""),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -66,6 +69,7 @@ class FocusDialStats:
             "total_seconds": self.total_seconds,
             "tasks_total": self.tasks_total,
             "completed_tasks": self.completed_tasks,
+            "selected_project_id": self.selected_project_id,
         }
 
     def ensure_today(self) -> None:
@@ -179,3 +183,11 @@ class FocusDialStatsStore:
     def get_completed_tasks(self) -> list[dict[str, Any]]:
         """获取已完成任务缓存。"""
         return self._stats.get_completed_tasks()
+
+    async def async_set_selected_project_id(self, project_id: str) -> None:
+        async with self._lock:
+            self._stats.selected_project_id = str(project_id or "")
+            await self._store.async_save(self._stats.to_dict())
+
+    def get_selected_project_id(self) -> str:
+        return str(self._stats.selected_project_id or "")

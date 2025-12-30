@@ -14,6 +14,7 @@ ResetState StateMachine::resetState;
 SleepState StateMachine::sleepState;
 StartupState StateMachine::startupState;
 TaskCompletePromptState StateMachine::taskCompletePromptState;
+TaskDetailState StateMachine::taskDetailState;
 TaskListState StateMachine::taskListState;
 TaskListViewState StateMachine::taskListViewState;
 TimerState StateMachine::timerState;

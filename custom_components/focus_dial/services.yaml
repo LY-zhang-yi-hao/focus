@@ -1,4 +1,11 @@
 push_tasks:
   name: 推送任务到设备
-  description: 立即从 TickTick（todo 实体）刷新任务列表，并推送到 Focus Dial 设备（同时包含待办/已完成）。
-
+  description: >
+    立即从 TickTick（Open API / ticktick.get_* 服务）刷新“当前项目”的任务列表，并推送到 Focus Dial 设备（包含：项目列表、待办、已完成、子任务字段）。
+  fields:
+    project_id:
+      name: 项目 ID
+      description: 可选，指定要推送的 TickTick 项目（清单）ID；不填则使用上次设备选择的项目或默认项目。
+      required: false
+      selector:
+        text:

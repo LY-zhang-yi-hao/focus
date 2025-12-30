@@ -512,67 +512,43 @@ void DisplayController::drawProvisionScreen() {
     oled.display();
 }
 
-void DisplayController::drawTaskListScreen(const std::vector<FocusTask>& tasks, int selectedIndex, int displayOffset, bool showingCompleted) {
+void DisplayController::drawTaskListScreen(const String& projectName, const std::vector<FocusTask>& tasks, int selectedIndex, int displayOffset, bool showingCompleted) {
     if (isAnimationRunning()) return;
 
     oled.clearDisplay();
 
-    // ===== Header（分段控件：待办/已完成）=====
+    // ===== Header（项目名 + 模式/计数）=====
     setupChineseFont(u8g2Fonts, 1);
-
-    const int segX = 25;
-    const int segY = 0;
-    const int segW = 78;
-    const int segH = 14;
-    const int segR = 4;
-    const int segHalfW = segW / 2;
-
-    oled.drawRoundRect(segX, segY, segW, segH, segR, 1);
-    oled.drawLine(segX + segHalfW, segY + 2, segX + segHalfW, segY + segH - 3, 1);
-
-    if (showingCompleted) {
-        oled.fillRoundRect(segX + segHalfW + 1, segY + 1, segHalfW - 2, segH - 2, segR - 1, 1);
-    } else {
-        oled.fillRoundRect(segX + 1, segY + 1, segHalfW - 2, segH - 2, segR - 1, 1);
+    String proj = projectName;
+    if (proj.isEmpty()) {
+        proj = "TickTick";
     }
+    proj = utf8Truncate(proj, 6, true);
+    u8g2Fonts.setCursor(4, 12);
+    u8g2Fonts.print(proj);
 
-    const String leftLabel = "待办";
-    const String rightLabel = "已完成";
-    const int16_t labelY = 12;
-    const int16_t leftCenterX = segX + (segHalfW / 2);
-    const int16_t rightCenterX = segX + segHalfW + (segHalfW / 2);
-
-    u8g2Fonts.setForegroundColor(showingCompleted ? 1 : 0);
-    int16_t leftW = u8g2Fonts.getUTF8Width(leftLabel.c_str());
-    u8g2Fonts.setCursor(leftCenterX - leftW / 2, labelY);
-    u8g2Fonts.print(leftLabel);
-
-    u8g2Fonts.setForegroundColor(showingCompleted ? 0 : 1);
-    int16_t rightW = u8g2Fonts.getUTF8Width(rightLabel.c_str());
-    u8g2Fonts.setCursor(rightCenterX - rightW / 2, labelY);
-    u8g2Fonts.print(rightLabel);
-
-    // 右上角：索引计数（Picopixel）
-    if (!tasks.empty()) {
-        char countBuf[12];
-        int safeIndexForCount = selectedIndex;
-        if (safeIndexForCount < 0) safeIndexForCount = 0;
-        if (safeIndexForCount >= (int)tasks.size()) safeIndexForCount = (int)tasks.size() - 1;
-        snprintf(countBuf, sizeof(countBuf), "%d/%d", safeIndexForCount + 1, (int)tasks.size());
-
-        oled.setFont(&Picopixel);
-        oled.setTextSize(1);
-        oled.setTextColor(1);
-        const int countWidthApprox = (int)strlen(countBuf) * 4;
-        oled.setCursor(126 - countWidthApprox, 9);
-        oled.print(countBuf);
-    }
+    oled.setFont(&Picopixel);
+    oled.setTextSize(1);
+    oled.setTextColor(1);
+    char countBuf[16] = {0};
+    int safeIndexForCount = selectedIndex;
+    if (safeIndexForCount < 0) safeIndexForCount = 0;
+    if (!tasks.empty() && safeIndexForCount >= (int)tasks.size()) safeIndexForCount = (int)tasks.size() - 1;
+    snprintf(
+        countBuf,
+        sizeof(countBuf),
+        "%c%d/%d",
+        showingCompleted ? 'D' : 'T',
+        tasks.empty() ? 0 : (safeIndexForCount + 1),
+        (int)tasks.size()
+    );
+    const int countWidthApprox = (int)strlen(countBuf) * 4;
+    oled.setCursor(126 - countWidthApprox, 9);
+    oled.print(countBuf);
 
     // 空列表提示
     if (tasks.empty()) {
         setupChineseFont(u8g2Fonts, 1);
-
-        oled.drawRoundRect(8, 20, 112, 36, 6, 1);
 
         const String title = showingCompleted ? "暂无已完成" : "暂无待办";
         const String sub = showingCompleted ? "完成后将自动同步" : "请从家庭助手推送";
@@ -638,35 +614,44 @@ void DisplayController::drawTaskListScreen(const std::vector<FocusTask>& tasks, 
             name = suffix.isEmpty() ? "未命名任务" : ("任务 " + suffix);
         }
 
-        name = utf8Truncate(name, 7, true);
+        name = utf8Truncate(name, 6, true);
 
         setupChineseFont(u8g2Fonts, isSelected ? 0 : 1);
         u8g2Fonts.setCursor(TEXT_X, textY);
         u8g2Fonts.print(name);
 
-        // 右侧信息（待办：建议时长；已完成：完成日期）
+        // 右侧信息：截止/优先级/重复/提醒/子任务
         oled.setFont(&Picopixel);
         oled.setTextSize(1);
         oled.setTextColor(isSelected ? 0 : 1);
 
-        char rightLabel[12] = {0};
-        if (showingCompleted) {
-            if (!tasks[taskIndex].completedAt.isEmpty()) {
-                snprintf(rightLabel, sizeof(rightLabel), "%s", tasks[taskIndex].completedAt.c_str());
-            } else {
-                snprintf(rightLabel, sizeof(rightLabel), "DONE");
-            }
+        String dateStr = showingCompleted ? tasks[taskIndex].completedAt : tasks[taskIndex].dueMmdd;
+        if (dateStr.isEmpty()) {
+            dateStr = "--.--";
+        }
+        char priorityChar = '-';
+        if (!tasks[taskIndex].priorityFlag.isEmpty()) {
+            priorityChar = tasks[taskIndex].priorityFlag[0];
         } else {
-            const int minutes = tasks[taskIndex].estimatedDuration > 0 ? tasks[taskIndex].estimatedDuration : 25;
-            if (minutes >= 60 && minutes % 60 == 0) {
-                snprintf(rightLabel, sizeof(rightLabel), "%dH", minutes / 60);
-            } else {
-                snprintf(rightLabel, sizeof(rightLabel), "%dM", minutes);
-            }
+            const int p = tasks[taskIndex].priority;
+            if (p >= 5) priorityChar = 'H';
+            else if (p >= 3) priorityChar = 'M';
+            else if (p >= 1) priorityChar = 'L';
+        }
+        const char repeatChar = tasks[taskIndex].hasRepeat ? 'R' : '-';
+        const char reminderChar = tasks[taskIndex].hasReminder ? 'A' : '-';
+
+        char subBuf[10] = {0};
+        if (tasks[taskIndex].subtasksTotal > 0) {
+            snprintf(subBuf, sizeof(subBuf), "%d/%d", tasks[taskIndex].subtasksDone, tasks[taskIndex].subtasksTotal);
         }
 
+        char rightLabel[24] = {0};
+        snprintf(rightLabel, sizeof(rightLabel), "%s%c%c%c%s", dateStr.c_str(), priorityChar, repeatChar, reminderChar, subBuf);
+
         const int rightWApprox = (int)strlen(rightLabel) * 4;
-        const int rightX = (CARD_X + CARD_W) - RIGHT_LABEL_PADDING - rightWApprox;
+        int rightX = (CARD_X + CARD_W) - RIGHT_LABEL_PADDING - rightWApprox;
+        if (rightX < TEXT_X) rightX = TEXT_X;
         oled.setCursor(rightX, cardY + 11);
         oled.print(rightLabel);
     }
@@ -676,17 +661,8 @@ void DisplayController::drawTaskListScreen(const std::vector<FocusTask>& tasks, 
 
     char info[32] = {0};
     if (showingCompleted) {
-        uint32_t displaySeconds = selectedTask.completedSpentSeconds;
-        if (displaySeconds == 0) {
-            displaySeconds = selectedTask.spentTodaySeconds;
-        }
-        const uint32_t roundedMin = (displaySeconds + 30) / 60;
-        if (!selectedTask.completedAt.isEmpty() && roundedMin > 0) {
-            snprintf(info, sizeof(info), "%s %luM", selectedTask.completedAt.c_str(), (unsigned long)roundedMin);
-        } else if (!selectedTask.completedAt.isEmpty()) {
-            snprintf(info, sizeof(info), "%s DONE", selectedTask.completedAt.c_str());
-        } else if (roundedMin > 0) {
-            snprintf(info, sizeof(info), "DONE %luM", (unsigned long)roundedMin);
+        if (!selectedTask.completedAt.isEmpty()) {
+            snprintf(info, sizeof(info), "DONE %s", selectedTask.completedAt.c_str());
         } else {
             snprintf(info, sizeof(info), "DONE");
         }
@@ -905,10 +881,11 @@ void DisplayController::drawDurationSelectScreen(const String& taskName, int dur
     oled.display();
 }
 
-void DisplayController::drawTaskListViewScreen(const std::vector<FocusTask>& tasks, int selectedIndex, int displayOffset, bool showingCompleted) {
+void DisplayController::drawTaskListViewScreen(const String& projectName, const std::vector<FocusTask>& tasks, int selectedIndex, int displayOffset, bool showingCompleted) {
     if (isAnimationRunning()) return;
 
     oled.clearDisplay();
+    (void)projectName; // 当前布局已较紧凑，暂不在 VIEW 页展示项目名
 
     // ===== Header（VIEW 徽标 + 分段控件）=====
     setupChineseFont(u8g2Fonts, 1);
@@ -1026,26 +1003,34 @@ void DisplayController::drawTaskListViewScreen(const std::vector<FocusTask>& tas
         u8g2Fonts.setCursor(TEXT_X, textY);
         u8g2Fonts.print(name);
 
-        // 右侧信息（与选择页一致）
+        // 右侧信息：截止/优先级/重复/提醒/子任务（与选择页一致）
         oled.setFont(&Picopixel);
         oled.setTextSize(1);
         oled.setTextColor(isSelected ? 0 : 1);
 
-        char rightLabel[12] = {0};
-        if (showingCompleted) {
-            if (!tasks[taskIndex].completedAt.isEmpty()) {
-                snprintf(rightLabel, sizeof(rightLabel), "%s", tasks[taskIndex].completedAt.c_str());
-            } else {
-                snprintf(rightLabel, sizeof(rightLabel), "DONE");
-            }
-        } else {
-            const int minutes = tasks[taskIndex].estimatedDuration > 0 ? tasks[taskIndex].estimatedDuration : 25;
-            if (minutes >= 60 && minutes % 60 == 0) {
-                snprintf(rightLabel, sizeof(rightLabel), "%dH", minutes / 60);
-            } else {
-                snprintf(rightLabel, sizeof(rightLabel), "%dM", minutes);
-            }
+        String dateStr = showingCompleted ? tasks[taskIndex].completedAt : tasks[taskIndex].dueMmdd;
+        if (dateStr.isEmpty()) {
+            dateStr = "--.--";
         }
+        char priorityChar = '-';
+        if (!tasks[taskIndex].priorityFlag.isEmpty()) {
+            priorityChar = tasks[taskIndex].priorityFlag[0];
+        } else {
+            const int p = tasks[taskIndex].priority;
+            if (p >= 5) priorityChar = 'H';
+            else if (p >= 3) priorityChar = 'M';
+            else if (p >= 1) priorityChar = 'L';
+        }
+        const char repeatChar = tasks[taskIndex].hasRepeat ? 'R' : '-';
+        const char reminderChar = tasks[taskIndex].hasReminder ? 'A' : '-';
+
+        char subBuf[10] = {0};
+        if (tasks[taskIndex].subtasksTotal > 0) {
+            snprintf(subBuf, sizeof(subBuf), "%d/%d", tasks[taskIndex].subtasksDone, tasks[taskIndex].subtasksTotal);
+        }
+
+        char rightLabel[24] = {0};
+        snprintf(rightLabel, sizeof(rightLabel), "%s%c%c%c%s", dateStr.c_str(), priorityChar, repeatChar, reminderChar, subBuf);
 
         const int rightWApprox = (int)strlen(rightLabel) * 4;
         const int rightX = (CARD_X + CARD_W) - RIGHT_LABEL_PADDING - rightWApprox;
@@ -1065,6 +1050,713 @@ void DisplayController::drawTaskListViewScreen(const std::vector<FocusTask>& tas
     const int total = (int)tasks.size();
     const int visible = (total < MAX_VISIBLE) ? total : MAX_VISIBLE;
     drawTaskListScrollBar(oled, 123, 16, 4, 36, displayOffset, total, visible);
+
+    oled.display();
+}
+
+void DisplayController::drawProjectSelectScreen(const std::vector<FocusProject>& projects, int selectedIndex, int displayOffset, const String& selectedProjectId, bool readOnly) {
+    if (isAnimationRunning()) return;
+
+    oled.clearDisplay();
+
+    // ===== Header（VIEW 徽标 + 标题 + 计数）=====
+    setupChineseFont(u8g2Fonts, 1);
+
+    int headerLeft = 4;
+    if (readOnly) {
+        oled.fillRoundRect(4, 0, 22, 14, 4, 1);
+        oled.setFont(&Picopixel);
+        oled.setTextSize(1);
+        oled.setTextColor(0);
+        oled.setCursor(7, 9);
+        oled.print("VIEW");
+        headerLeft = 30;
+    }
+
+    u8g2Fonts.setForegroundColor(1);
+    u8g2Fonts.setCursor(headerLeft, 12);
+    u8g2Fonts.print("项目");
+
+    // 顶部右侧计数：Pidx/total
+    oled.setFont(&Picopixel);
+    oled.setTextSize(1);
+    oled.setTextColor(1);
+    char countBuf[16] = {0};
+    int safeIndexForCount = selectedIndex;
+    if (safeIndexForCount < 0) safeIndexForCount = 0;
+    if (!projects.empty() && safeIndexForCount >= (int)projects.size()) safeIndexForCount = (int)projects.size() - 1;
+    snprintf(
+        countBuf,
+        sizeof(countBuf),
+        "P%d/%d",
+        projects.empty() ? 0 : (safeIndexForCount + 1),
+        (int)projects.size()
+    );
+    const int countWidthApprox = (int)strlen(countBuf) * 4;
+    oled.setCursor(126 - countWidthApprox, 9);
+    oled.print(countBuf);
+
+    // 空列表提示
+    if (projects.empty()) {
+        setupChineseFont(u8g2Fonts, 1);
+        oled.drawRoundRect(8, 20, 112, 36, 6, 1);
+        const String title = "暂无项目";
+        int16_t titleW = u8g2Fonts.getUTF8Width(title.c_str());
+        int16_t titleX = (128 - titleW) / 2;
+        u8g2Fonts.setCursor(titleX < 0 ? 0 : titleX, 38);
+        u8g2Fonts.print(title);
+
+        oled.drawRoundRect(4, 54, 120, 10, 3, 1);
+        oled.setFont(&Picopixel);
+        oled.setTextSize(1);
+        oled.setTextColor(1);
+        oled.setCursor(34, 62);
+        oled.print("DBL BACK");
+        oled.display();
+        return;
+    }
+
+    // ===== List（卡片式列表）=====
+    const int MAX_VISIBLE = 2;
+    const int CARD_X = 4;
+    const int CARD_W = 116;
+    const int CARD_H = 16;
+    const int CARD_GAP = 4;
+    const int CARD_R = 4;
+    const int LIST_TOP = 16;
+    const int TEXT_X = CARD_X + 14;
+    const int TEXT_BASELINE_OFFSET = 12;
+    const int RIGHT_LABEL_PADDING = 8;
+
+    // 保护选中索引
+    if (selectedIndex < 0) selectedIndex = 0;
+    if (selectedIndex >= (int)projects.size()) selectedIndex = (int)projects.size() - 1;
+
+    for (int i = 0; i < MAX_VISIBLE && (displayOffset + i) < (int)projects.size(); i++) {
+        int idx = displayOffset + i;
+        const bool isSelected = (idx == selectedIndex);
+        const int cardY = LIST_TOP + (i * (CARD_H + CARD_GAP));
+        const int textY = cardY + TEXT_BASELINE_OFFSET;
+
+        if (isSelected) {
+            oled.fillRoundRect(CARD_X, cardY, CARD_W, CARD_H, CARD_R, 1);
+        } else {
+            oled.drawRoundRect(CARD_X, cardY, CARD_W, CARD_H, CARD_R, 1);
+        }
+
+        // 选中指示箭头
+        const int arrowX = CARD_X + 6;
+        const int arrowY = cardY + (CARD_H / 2);
+        oled.fillTriangle(arrowX, arrowY, arrowX + 4, arrowY - 3, arrowX + 4, arrowY + 3, isSelected ? 0 : 1);
+
+        // 项目名
+        String name = projects[idx].name;
+        if (name.isEmpty()) {
+            String suffix = projects[idx].id;
+            if (suffix.length() > 4) suffix = suffix.substring(suffix.length() - 4);
+            name = suffix.isEmpty() ? "未命名项目" : ("项目 " + suffix);
+        }
+        name = utf8Truncate(name, 8, true);
+
+        setupChineseFont(u8g2Fonts, isSelected ? 0 : 1);
+        u8g2Fonts.setCursor(TEXT_X, textY);
+        u8g2Fonts.print(name);
+
+        // 右侧标签：当前项目显示 CUR
+        const bool isCurrent = (projects[idx].id == selectedProjectId);
+        if (isCurrent) {
+            oled.setFont(&Picopixel);
+            oled.setTextSize(1);
+            oled.setTextColor(isSelected ? 0 : 1);
+            const char* label = "CUR";
+            const int rightWApprox = (int)strlen(label) * 4;
+            const int rightX = (CARD_X + CARD_W) - RIGHT_LABEL_PADDING - rightWApprox;
+            oled.setCursor(rightX, cardY + 11);
+            oled.print(label);
+        }
+    }
+
+    // ===== Footer（操作提示）=====
+    oled.drawRoundRect(4, 54, 120, 10, 3, 1);
+    oled.setFont(&Picopixel);
+    oled.setTextSize(1);
+    oled.setTextColor(1);
+    oled.setCursor(30, 62);
+    oled.print("CLICK SELECT");
+
+    // ===== Scrollbar =====
+    const int total = (int)projects.size();
+    const int visible = (total < MAX_VISIBLE) ? total : MAX_VISIBLE;
+    drawTaskListScrollBar(oled, 123, 16, 4, 36, displayOffset, total, visible);
+
+    oled.display();
+}
+
+void DisplayController::drawTaskDetailScreen(const String& projectName, const FocusTask& task, int selectedIndex, int displayOffset) {
+    if (isAnimationRunning()) return;
+
+    oled.clearDisplay();
+
+    // ===== Header（任务名 + 子任务计数）=====
+    setupChineseFont(u8g2Fonts, 1);
+
+    String title = task.name;
+    if (title.isEmpty()) title = task.displayName;
+    if (title.isEmpty()) {
+        String suffix = task.id;
+        if (suffix.length() > 4) suffix = suffix.substring(suffix.length() - 4);
+        title = suffix.isEmpty() ? "未命名任务" : ("任务 " + suffix);
+    }
+    title = utf8Truncate(title, 8, true);
+    u8g2Fonts.setCursor(4, 12);
+    u8g2Fonts.print(title);
+
+    (void)projectName; // 当前详情页优先显示任务名（项目名在任务列表页/项目选择页可见）
+
+    const int totalRows = (int)task.subtasks.size() + 1; // +1：完成任务
+    int safeIndexForCount = selectedIndex;
+    if (safeIndexForCount < 0) safeIndexForCount = 0;
+    if (safeIndexForCount >= totalRows) safeIndexForCount = totalRows - 1;
+
+    oled.setFont(&Picopixel);
+    oled.setTextSize(1);
+    oled.setTextColor(1);
+
+    char countBuf[16] = {0};
+    if (task.subtasksTotal > 0) {
+        snprintf(countBuf, sizeof(countBuf), "%d/%d", task.subtasksDone, task.subtasksTotal);
+    } else if (!task.subtasks.empty()) {
+        snprintf(countBuf, sizeof(countBuf), "%d/%d", task.subtasksDone, (int)task.subtasks.size());
+    } else {
+        snprintf(countBuf, sizeof(countBuf), "DONE");
+    }
+    const int countWidthApprox = (int)strlen(countBuf) * 4;
+    oled.setCursor(126 - countWidthApprox, 9);
+    oled.print(countBuf);
+
+    // ===== List（子任务 + 完成任务）=====
+    const int MAX_VISIBLE = 2;
+    const int CARD_X = 4;
+    const int CARD_W = 116;
+    const int CARD_H = 16;
+    const int CARD_GAP = 4;
+    const int CARD_R = 4;
+    const int LIST_TOP = 16;
+    const int CHECK_X = CARD_X + 6;
+    const int CHECK_Y_OFFSET = 5;
+    const int TEXT_X = CARD_X + 16;
+    const int TEXT_BASELINE_OFFSET = 12;
+    const int RIGHT_LABEL_PADDING = 8;
+
+    if (selectedIndex < 0) selectedIndex = 0;
+    if (selectedIndex >= totalRows) selectedIndex = totalRows - 1;
+
+    for (int i = 0; i < MAX_VISIBLE && (displayOffset + i) < totalRows; i++) {
+        const int rowIndex = displayOffset + i;
+        const bool isSelected = (rowIndex == selectedIndex);
+        const int cardY = LIST_TOP + (i * (CARD_H + CARD_GAP));
+        const int textY = cardY + TEXT_BASELINE_OFFSET;
+
+        if (isSelected) {
+            oled.fillRoundRect(CARD_X, cardY, CARD_W, CARD_H, CARD_R, 1);
+        } else {
+            oled.drawRoundRect(CARD_X, cardY, CARD_W, CARD_H, CARD_R, 1);
+        }
+
+        // 子任务行
+        if (rowIndex < (int)task.subtasks.size()) {
+            const FocusSubtask& sub = task.subtasks[rowIndex];
+            const bool checked = sub.isCompleted;
+            const uint16_t color = isSelected ? 0 : 1;
+
+            // Checkbox
+            oled.drawRect(CHECK_X, cardY + CHECK_Y_OFFSET, 7, 7, color);
+            if (checked) {
+                oled.fillRect(CHECK_X + 2, cardY + CHECK_Y_OFFSET + 2, 3, 3, color);
+            }
+
+            String subTitle = sub.title;
+            if (subTitle.isEmpty()) {
+                String suffix = sub.id;
+                if (suffix.length() > 4) suffix = suffix.substring(suffix.length() - 4);
+                subTitle = suffix.isEmpty() ? "子任务" : ("子任务 " + suffix);
+            }
+            subTitle = utf8Truncate(subTitle, 8, true);
+
+            setupChineseFont(u8g2Fonts, isSelected ? 0 : 1);
+            u8g2Fonts.setCursor(TEXT_X, textY);
+            u8g2Fonts.print(subTitle);
+
+            // 右侧：ON/OFF
+            oled.setFont(&Picopixel);
+            oled.setTextSize(1);
+            oled.setTextColor(color);
+            const char* flag = checked ? "ON" : "OFF";
+            const int flagWApprox = (int)strlen(flag) * 4;
+            const int rightX = (CARD_X + CARD_W) - RIGHT_LABEL_PADDING - flagWApprox;
+            oled.setCursor(rightX, cardY + 11);
+            oled.print(flag);
+        } else {
+            // 完成任务行
+            setupChineseFont(u8g2Fonts, isSelected ? 0 : 1);
+            u8g2Fonts.setCursor(TEXT_X, textY);
+            u8g2Fonts.print("完成任务");
+
+            oled.setFont(&Picopixel);
+            oled.setTextSize(1);
+            oled.setTextColor(isSelected ? 0 : 1);
+            const char* label = "DONE";
+            const int labelWApprox = (int)strlen(label) * 4;
+            const int rightX = (CARD_X + CARD_W) - RIGHT_LABEL_PADDING - labelWApprox;
+            oled.setCursor(rightX, cardY + 11);
+            oled.print(label);
+        }
+    }
+
+    // ===== Footer（提示）=====
+    oled.drawRoundRect(4, 54, 120, 10, 3, 1);
+    oled.setFont(&Picopixel);
+    oled.setTextSize(1);
+    oled.setTextColor(1);
+    const bool onDoneRow = (selectedIndex >= (int)task.subtasks.size());
+    oled.setCursor(6, 62);
+    oled.print(onDoneRow ? "CLICK DONE" : "CLICK TOGGLE");
+    oled.setCursor(84, 62);
+    oled.print("DBL BACK");
+
+    // ===== Scrollbar =====
+    const int total = totalRows;
+    const int visible = (total < MAX_VISIBLE) ? total : MAX_VISIBLE;
+    drawTaskListScrollBar(oled, 123, 16, 4, 36, displayOffset, total, visible);
+
+    oled.display();
+}
+
+// ============================================================
+// Animated Task List Drawing Methods
+// ============================================================
+
+void DisplayController::drawSegmentControlAnimated(
+    int segX, int segY, int segW, int segH, int segR,
+    bool showingCompleted,
+    float highlightX
+) {
+    const int segHalfW = segW / 2;
+
+    // Draw outer frame
+    oled.drawRoundRect(segX, segY, segW, segH, segR, 1);
+
+    // Draw separator line
+    oled.drawLine(segX + segHalfW, segY + 2, segX + segHalfW, segY + segH - 3, 1);
+
+    // Draw animated highlight block
+    oled.fillRoundRect(
+        (int)highlightX, segY + 1,
+        segHalfW - 2, segH - 2,
+        segR - 1, 1
+    );
+
+    // Draw labels
+    setupChineseFont(u8g2Fonts, 1);
+
+    const String leftLabel = "待办";
+    const String rightLabel = "已完成";
+    const int16_t labelY = 12;
+    const int16_t leftCenterX = segX + (segHalfW / 2);
+    const int16_t rightCenterX = segX + segHalfW + (segHalfW / 2);
+
+    // Determine text color based on highlight position
+    float midPoint = segX + segHalfW / 2.0f + segHalfW / 2.0f;
+    bool highlightOnLeft = (highlightX < midPoint);
+
+    u8g2Fonts.setForegroundColor(highlightOnLeft ? 0 : 1);
+    int16_t leftW = u8g2Fonts.getUTF8Width(leftLabel.c_str());
+    u8g2Fonts.setCursor(leftCenterX - leftW / 2, labelY);
+    u8g2Fonts.print(leftLabel);
+
+    u8g2Fonts.setForegroundColor(highlightOnLeft ? 1 : 0);
+    int16_t rightW = u8g2Fonts.getUTF8Width(rightLabel.c_str());
+    u8g2Fonts.setCursor(rightCenterX - rightW / 2, labelY);
+    u8g2Fonts.print(rightLabel);
+}
+
+void DisplayController::drawScrollBarAnimated(
+    int x, int y, int w, int h,
+    float knobY,
+    int knobH
+) {
+    // Draw track
+    oled.drawRoundRect(x, y, w, h, 2, 1);
+
+    // Draw animated knob
+    oled.fillRoundRect(x + 1, (int)knobY, w - 2, knobH, 1, 1);
+}
+
+void DisplayController::drawTaskListScreenAnimated(
+    const String& projectName,
+    const std::vector<FocusTask>& tasks,
+    int selectedIndex,
+    int displayOffset,
+    bool showingCompleted,
+    const TaskListAnimationState& animState
+) {
+    if (isAnimationRunning()) return;
+
+    oled.clearDisplay();
+    (void)projectName;
+
+    // ===== Header (Segment Control - Animated) =====
+    const int segX = 25;
+    const int segY = 0;
+    const int segW = 78;
+    const int segH = 14;
+    const int segR = 4;
+
+    drawSegmentControlAnimated(
+        segX, segY, segW, segH, segR,
+        showingCompleted,
+        animState.segmentHighlightX.getValue()
+    );
+
+    // Top-right index counter
+    if (!tasks.empty()) {
+        char countBuf[12];
+        int safeIndex = selectedIndex;
+        if (safeIndex < 0) safeIndex = 0;
+        if (safeIndex >= (int)tasks.size()) safeIndex = (int)tasks.size() - 1;
+        snprintf(countBuf, sizeof(countBuf), "%d/%d", safeIndex + 1, (int)tasks.size());
+
+        oled.setFont(&Picopixel);
+        oled.setTextSize(1);
+        oled.setTextColor(1);
+        const int countWidthApprox = (int)strlen(countBuf) * 4;
+        oled.setCursor(126 - countWidthApprox, 9);
+        oled.print(countBuf);
+    }
+
+    // Empty list hint (no border box)
+    if (tasks.empty()) {
+        setupChineseFont(u8g2Fonts, 1);
+
+        const String title = showingCompleted ? "暂无已完成" : "暂无待办";
+        const String sub = showingCompleted ? "完成后将自动同步" : "请从家庭助手推送";
+
+        int16_t titleW = u8g2Fonts.getUTF8Width(title.c_str());
+        int16_t subW = u8g2Fonts.getUTF8Width(sub.c_str());
+        int16_t titleX = (128 - titleW) / 2;
+        int16_t subX = (128 - subW) / 2;
+
+        u8g2Fonts.setCursor(titleX < 0 ? 0 : titleX, 38);
+        u8g2Fonts.print(title);
+        u8g2Fonts.setCursor(subX < 0 ? 0 : subX, 52);
+        u8g2Fonts.print(sub);
+        oled.display();
+        return;
+    }
+
+    // ===== List (Simple style with smooth scrolling animation) =====
+    const int MAX_VISIBLE = 2;
+    const int LIST_TOP = 18;
+    const int LINE_HEIGHT = 18;
+    const int TEXT_X = 4;
+    const int LIST_BOTTOM = LIST_TOP + MAX_VISIBLE * LINE_HEIGHT;
+
+    // Protect selected index
+    if (selectedIndex < 0) selectedIndex = 0;
+    if (selectedIndex >= (int)tasks.size()) selectedIndex = (int)tasks.size() - 1;
+
+    // Get animated scroll offset (smooth scrolling)
+    float animatedScrollOffset = animState.scrollOffset.getValue();
+
+    // Calculate which tasks are potentially visible (with margin for animation)
+    int firstVisible = (int)floor(animatedScrollOffset);
+    if (firstVisible < 0) firstVisible = 0;
+    int lastVisible = firstVisible + MAX_VISIBLE + 1;  // +1 for smooth transition
+    if (lastVisible >= (int)tasks.size()) lastVisible = (int)tasks.size() - 1;
+
+    // Draw all potentially visible task items
+    for (int taskIndex = firstVisible; taskIndex <= lastVisible && taskIndex < (int)tasks.size(); taskIndex++) {
+        // Calculate Y position based on animated scroll offset
+        float yPosFloat = LIST_TOP + (taskIndex - animatedScrollOffset) * LINE_HEIGHT;
+        int yPos = (int)yPosFloat;
+
+        // Strict clipping: only draw items fully within list area
+        // Skip items that would overlap with header (y < LIST_TOP)
+        if (yPos < LIST_TOP || yPos >= LIST_BOTTOM) {
+            continue;
+        }
+
+        const bool isSelected = (taskIndex == selectedIndex);
+
+        // Draw selection highlight (full width bar, no border)
+        if (isSelected) {
+            oled.fillRect(0, yPos, 120, LINE_HEIGHT, 1);
+        }
+
+        // Task name (left side)
+        String name = tasks[taskIndex].name;
+        if (name.isEmpty()) name = tasks[taskIndex].displayName;
+        if (name.isEmpty()) {
+            String suffix = tasks[taskIndex].id;
+            if (suffix.length() > 4) suffix = suffix.substring(suffix.length() - 4);
+            name = suffix.isEmpty() ? "未命名" : ("任务" + suffix);
+        }
+        name = utf8Truncate(name, 6, true);
+
+        setupChineseFont(u8g2Fonts, isSelected ? 0 : 1);
+        u8g2Fonts.setCursor(TEXT_X, yPos + 14);
+        u8g2Fonts.print(name);
+
+        // Right label: show TODAY focus time (right aligned)
+        oled.setFont(&Picopixel);
+        oled.setTextSize(1);
+        oled.setTextColor(isSelected ? 0 : 1);
+
+        char rightLabel[12] = {0};
+        if (showingCompleted) {
+            if (!tasks[taskIndex].completedAt.isEmpty()) {
+                snprintf(rightLabel, sizeof(rightLabel), "%s", tasks[taskIndex].completedAt.c_str());
+            } else {
+                snprintf(rightLabel, sizeof(rightLabel), "DONE");
+            }
+        } else {
+            const uint32_t todayMin = tasks[taskIndex].spentTodaySeconds / 60;
+            if (todayMin >= 60) {
+                snprintf(rightLabel, sizeof(rightLabel), "%luH%luM", (unsigned long)(todayMin / 60), (unsigned long)(todayMin % 60));
+            } else {
+                snprintf(rightLabel, sizeof(rightLabel), "%luM", (unsigned long)todayMin);
+            }
+        }
+
+        const int rightWApprox = (int)strlen(rightLabel) * 4;
+        const int rightX = 118 - rightWApprox;
+        oled.setCursor(rightX, yPos + 12);
+        oled.print(rightLabel);
+    }
+
+    // ===== Scrollbar (Animated) =====
+    const int total = (int)tasks.size();
+    const int visible = (total < MAX_VISIBLE) ? total : MAX_VISIBLE;
+
+    if (total > visible) {
+        const int scrollbarX = 123;
+        const int scrollbarY = 16;
+        const int scrollbarW = 4;
+        const int scrollbarH = 36;
+        const int innerH = scrollbarH - 2;
+
+        int knobH = (innerH * visible) / total;
+        if (knobH < 6) knobH = 6;
+
+        drawScrollBarAnimated(
+            scrollbarX, scrollbarY, scrollbarW, scrollbarH,
+            animState.scrollbarY.getValue(),
+            knobH
+        );
+    }
+
+    oled.display();
+}
+
+void DisplayController::drawTaskListViewScreenAnimated(
+    const String& projectName,
+    const std::vector<FocusTask>& tasks,
+    int selectedIndex,
+    int displayOffset,
+    bool showingCompleted,
+    const TaskListAnimationState& animState
+) {
+    if (isAnimationRunning()) return;
+
+    oled.clearDisplay();
+    (void)projectName;
+
+    // ===== Header (VIEW badge + Segment Control - Animated) =====
+    setupChineseFont(u8g2Fonts, 1);
+
+    // VIEW badge
+    oled.setFont(&Picopixel);
+    oled.setTextSize(1);
+    oled.setTextColor(1);
+    oled.setCursor(2, 9);
+    oled.print("VIEW");
+
+    // Segment control (smaller, shifted right)
+    const int segX = 29;
+    const int segY = 0;
+    const int segW = 74;
+    const int segH = 14;
+    const int segR = 4;
+    const int segHalfW = segW / 2;
+
+    oled.drawRoundRect(segX, segY, segW, segH, segR, 1);
+    oled.drawLine(segX + segHalfW, segY + 2, segX + segHalfW, segY + segH - 3, 1);
+
+    // Animated highlight
+    float highlightX = animState.segmentHighlightX.getValue();
+    float adjustedHighlightX = highlightX + 4;  // Offset for VIEW mode
+    oled.fillRoundRect(
+        (int)adjustedHighlightX, segY + 1,
+        segHalfW - 2, segH - 2,
+        segR - 1, 1
+    );
+
+    // Labels
+    const String leftLabel = "待办";
+    const String rightLabelSeg = "已完成";
+    const int16_t labelY = 12;
+    const int16_t leftCenterX = segX + (segHalfW / 2);
+    const int16_t rightCenterX = segX + segHalfW + (segHalfW / 2);
+
+    float midPoint = segX + segHalfW / 2.0f + segHalfW / 2.0f;
+    bool highlightOnLeft = (adjustedHighlightX < midPoint);
+
+    u8g2Fonts.setForegroundColor(highlightOnLeft ? 0 : 1);
+    int16_t leftW = u8g2Fonts.getUTF8Width(leftLabel.c_str());
+    u8g2Fonts.setCursor(leftCenterX - leftW / 2, labelY);
+    u8g2Fonts.print(leftLabel);
+
+    u8g2Fonts.setForegroundColor(highlightOnLeft ? 1 : 0);
+    int16_t rightW = u8g2Fonts.getUTF8Width(rightLabelSeg.c_str());
+    u8g2Fonts.setCursor(rightCenterX - rightW / 2, labelY);
+    u8g2Fonts.print(rightLabelSeg);
+
+    // Top-right index counter
+    if (!tasks.empty()) {
+        char countBuf[12];
+        int safeIndex = selectedIndex;
+        if (safeIndex < 0) safeIndex = 0;
+        if (safeIndex >= (int)tasks.size()) safeIndex = (int)tasks.size() - 1;
+        snprintf(countBuf, sizeof(countBuf), "%d/%d", safeIndex + 1, (int)tasks.size());
+
+        oled.setFont(&Picopixel);
+        oled.setTextSize(1);
+        oled.setTextColor(1);
+        const int countWidthApprox = (int)strlen(countBuf) * 4;
+        oled.setCursor(126 - countWidthApprox, 9);
+        oled.print(countBuf);
+    }
+
+    // Empty list hint (no border box)
+    if (tasks.empty()) {
+        setupChineseFont(u8g2Fonts, 1);
+
+        const String title = showingCompleted ? "暂无已完成" : "暂无待办";
+        const String sub = showingCompleted ? "完成后将自动同步" : "请从家庭助手推送";
+
+        int16_t titleW = u8g2Fonts.getUTF8Width(title.c_str());
+        int16_t subW = u8g2Fonts.getUTF8Width(sub.c_str());
+        int16_t titleX = (128 - titleW) / 2;
+        int16_t subX = (128 - subW) / 2;
+
+        u8g2Fonts.setCursor(titleX < 0 ? 0 : titleX, 38);
+        u8g2Fonts.print(title);
+        u8g2Fonts.setCursor(subX < 0 ? 0 : subX, 52);
+        u8g2Fonts.print(sub);
+        oled.display();
+        return;
+    }
+
+    // ===== List (Simple style with smooth scrolling animation) =====
+    const int MAX_VISIBLE = 2;
+    const int LIST_TOP = 18;
+    const int LINE_HEIGHT = 18;
+    const int TEXT_X = 4;
+    const int LIST_BOTTOM = LIST_TOP + MAX_VISIBLE * LINE_HEIGHT;
+
+    // Protect selected index
+    if (selectedIndex < 0) selectedIndex = 0;
+    if (selectedIndex >= (int)tasks.size()) selectedIndex = (int)tasks.size() - 1;
+
+    // Get animated scroll offset (smooth scrolling)
+    float animatedScrollOffset = animState.scrollOffset.getValue();
+
+    // Calculate which tasks are potentially visible (with margin for animation)
+    int firstVisible = (int)floor(animatedScrollOffset);
+    if (firstVisible < 0) firstVisible = 0;
+    int lastVisible = firstVisible + MAX_VISIBLE + 1;  // +1 for smooth transition
+    if (lastVisible >= (int)tasks.size()) lastVisible = (int)tasks.size() - 1;
+
+    // Draw all potentially visible task items
+    for (int taskIndex = firstVisible; taskIndex <= lastVisible && taskIndex < (int)tasks.size(); taskIndex++) {
+        // Calculate Y position based on animated scroll offset
+        float yPosFloat = LIST_TOP + (taskIndex - animatedScrollOffset) * LINE_HEIGHT;
+        int yPos = (int)yPosFloat;
+
+        // Strict clipping: only draw items fully within list area
+        // Skip items that would overlap with header (y < LIST_TOP)
+        if (yPos < LIST_TOP || yPos >= LIST_BOTTOM) {
+            continue;
+        }
+
+        const bool isSelected = (taskIndex == selectedIndex);
+
+        // Draw selection highlight (full width bar, no border)
+        if (isSelected) {
+            oled.fillRect(0, yPos, 120, LINE_HEIGHT, 1);
+        }
+
+        // Task name (left side)
+        String name = tasks[taskIndex].name;
+        if (name.isEmpty()) name = tasks[taskIndex].displayName;
+        if (name.isEmpty()) {
+            String suffix = tasks[taskIndex].id;
+            if (suffix.length() > 4) suffix = suffix.substring(suffix.length() - 4);
+            name = suffix.isEmpty() ? "未命名" : ("任务" + suffix);
+        }
+        name = utf8Truncate(name, 6, true);
+
+        setupChineseFont(u8g2Fonts, isSelected ? 0 : 1);
+        u8g2Fonts.setCursor(TEXT_X, yPos + 14);
+        u8g2Fonts.print(name);
+
+        // Right label: show TODAY focus time (right aligned)
+        oled.setFont(&Picopixel);
+        oled.setTextSize(1);
+        oled.setTextColor(isSelected ? 0 : 1);
+
+        char rightLabel[12] = {0};
+        if (showingCompleted) {
+            if (!tasks[taskIndex].completedAt.isEmpty()) {
+                snprintf(rightLabel, sizeof(rightLabel), "%s", tasks[taskIndex].completedAt.c_str());
+            } else {
+                snprintf(rightLabel, sizeof(rightLabel), "DONE");
+            }
+        } else {
+            const uint32_t todayMin = tasks[taskIndex].spentTodaySeconds / 60;
+            if (todayMin >= 60) {
+                snprintf(rightLabel, sizeof(rightLabel), "%luH%luM", (unsigned long)(todayMin / 60), (unsigned long)(todayMin % 60));
+            } else {
+                snprintf(rightLabel, sizeof(rightLabel), "%luM", (unsigned long)todayMin);
+            }
+        }
+
+        const int rightWApprox = (int)strlen(rightLabel) * 4;
+        const int rightX = 118 - rightWApprox;
+        oled.setCursor(rightX, yPos + 12);
+        oled.print(rightLabel);
+    }
+
+    // ===== Scrollbar (Animated) =====
+    const int total = (int)tasks.size();
+    const int visible = (total < MAX_VISIBLE) ? total : MAX_VISIBLE;
+
+    if (total > visible) {
+        const int scrollbarX = 123;
+        const int scrollbarY = 16;
+        const int scrollbarW = 4;
+        const int scrollbarH = 36;
+        const int innerH = scrollbarH - 2;
+
+        int knobH = (innerH * visible) / total;
+        if (knobH < 6) knobH = 6;
+
+        drawScrollBarAnimated(
+            scrollbarX, scrollbarY, scrollbarW, scrollbarH,
+            animState.scrollbarY.getValue(),
+            knobH
+        );
+    }
 
     oled.display();
 }

@@ -608,7 +608,8 @@ void NetworkController::handleAPITaskList()
     }
 
     // 基础 JSON 校验（避免明显错误）/ Basic JSON validation
-    DynamicJsonDocument doc(8192);
+    // 任务列表 payload 可能包含 projects + subtasks，需更大缓冲区避免误判 invalid json
+    DynamicJsonDocument doc(24576);
     DeserializationError error = deserializeJson(doc, body);
     if (error)
     {

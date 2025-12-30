@@ -47,10 +47,18 @@ void DurationSelectState::enter()
             selectedTask.id,
             selectedTask.name,
             "",
-            selectedTask.displayName);
+            selectedTask.displayName,
+            selectedTask.projectId);
 
         displayController.showTimerStart();
         stateMachine.changeState(&StateMachine::timerState);
+    });
+
+    // 双击查看任务详情（子任务）/ Double press to view task detail (subtasks)
+    inputController.onDoublePressHandler([this]() {
+        Serial.println("DurationSelect: Double press - task detail / 双击进入任务详情");
+        StateMachine::taskDetailState.setTask(selectedTask, StateMachine::taskListState.selectedProjectName);
+        stateMachine.changeState(&StateMachine::taskDetailState);
     });
 
     // 长按取消返回任务列表 / Long press to cancel and return to task list

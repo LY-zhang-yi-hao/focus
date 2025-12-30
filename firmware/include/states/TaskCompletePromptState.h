@@ -22,13 +22,15 @@ public:
                     uint32_t elapsedSeconds,
                     bool countTime,
                     bool isCanceled,
-                    const String& taskDisplayName = "");
+                    const String& taskDisplayName = "",
+                    const String& taskProjectId = "");
 
 private:
     String taskId;
     String taskName;
     String sessionId;
     String taskDisplayName;
+    String taskProjectId;
     uint32_t elapsedSeconds;
     bool countTime;
     bool isCanceled;

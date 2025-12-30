@@ -12,6 +12,7 @@ TimerState::TimerState()
     : duration(0),
       elapsedTime(0),
       startTime(0),
+      taskProjectId(""),
       taskId(""),
       taskName(""),
       sessionId(""),
@@ -66,15 +67,16 @@ void TimerState::enter()
                                        displayController.showTimerPause();
 
                                        // Transition to PausedState and set elapsed time
-                                       StateMachine::pausedState.setPause(
-                                           this->duration,
-                                           this->elapsedTime,
-                                           this->taskId,
-                                           this->taskName,
-                                           this->sessionId,
-                                           this->taskDisplayName);
-                                       stateMachine.changeState(&StateMachine::pausedState); // Transition to Paused State / 切换到暂停状态
-                                   });
+	                                       StateMachine::pausedState.setPause(
+	                                           this->duration,
+	                                           this->elapsedTime,
+	                                           this->taskId,
+	                                           this->taskName,
+	                                           this->sessionId,
+	                                           this->taskDisplayName,
+	                                           this->taskProjectId);
+	                                       stateMachine.changeState(&StateMachine::pausedState); // Transition to Paused State / 切换到暂停状态
+	                                   });
 
     inputController.onDoublePressHandler([this]()
                                          {
@@ -103,16 +105,17 @@ void TimerState::enter()
                                              // 如果存在任务，则进入"是否完成任务"确认 / If task exists, ask whether to mark done
                                              if (!this->taskId.isEmpty())
                                              {
-                                                 StateMachine::taskCompletePromptState.setContext(
-                                                     this->taskId,
-                                                     this->taskName,
-                                                     this->sessionId,
-                                                     (uint32_t)this->elapsedTime,
-                                                     false,
-                                                     true,
-                                                     this->taskDisplayName);
-                                                 stateMachine.changeState(&StateMachine::taskCompletePromptState);
-                                             }
+	                                                 StateMachine::taskCompletePromptState.setContext(
+	                                                     this->taskId,
+	                                                     this->taskName,
+	                                                     this->sessionId,
+	                                                     (uint32_t)this->elapsedTime,
+	                                                     false,
+	                                                     true,
+	                                                     this->taskDisplayName,
+	                                                     this->taskProjectId);
+	                                                 stateMachine.changeState(&StateMachine::taskCompletePromptState);
+	                                             }
                                              else
                                              {
                                                  stateMachine.changeState(&StateMachine::idleState); // Transition to IdleState / 返回空闲
@@ -129,15 +132,16 @@ void TimerState::enter()
 
                                                // 进入只读任务列表查看状态（不暂停计时、不触发webhook）
                                                // Enter read-only task list view (no pause, no webhook)
-                                               StateMachine::taskListViewState.setTimerContext(
-                                                   this->duration,
-                                                   this->elapsedTime,
-                                                   this->taskId,
-                                                   this->taskName,
-                                                   this->sessionId,
-                                                   this->taskDisplayName);
-                                               stateMachine.changeState(&StateMachine::taskListViewState);
-                                           });
+	                                               StateMachine::taskListViewState.setTimerContext(
+	                                                   this->duration,
+	                                                   this->elapsedTime,
+	                                                   this->taskId,
+	                                                   this->taskName,
+	                                                   this->sessionId,
+	                                                   this->taskDisplayName,
+	                                                   this->taskProjectId);
+	                                               stateMachine.changeState(&StateMachine::taskListViewState);
+	                                           });
 
     // 长按也可以取消计时（保留作为备用）/ Long press also cancels timer (kept as backup)
     inputController.onLongPressHandler([this]()
@@ -167,16 +171,17 @@ void TimerState::enter()
                                            // 如果存在任务，则进入"是否完成任务"确认 / If task exists, ask whether to mark done
                                            if (!this->taskId.isEmpty())
                                            {
-                                               StateMachine::taskCompletePromptState.setContext(
-                                                   this->taskId,
-                                                   this->taskName,
-                                                   this->sessionId,
-                                                   (uint32_t)this->elapsedTime,
-                                                   false,
-                                                   true,
-                                                   this->taskDisplayName);
-                                               stateMachine.changeState(&StateMachine::taskCompletePromptState);
-                                           }
+	                                               StateMachine::taskCompletePromptState.setContext(
+	                                                   this->taskId,
+	                                                   this->taskName,
+	                                                   this->sessionId,
+	                                                   (uint32_t)this->elapsedTime,
+	                                                   false,
+	                                                   true,
+	                                                   this->taskDisplayName,
+	                                                   this->taskProjectId);
+	                                               stateMachine.changeState(&StateMachine::taskCompletePromptState);
+	                                           }
                                            else
                                            {
                                                stateMachine.changeState(&StateMachine::idleState); // Transition to IdleState / 返回空闲
@@ -236,18 +241,19 @@ void TimerState::update()
         displayController.showTimerDone();
 
         // 如果存在任务，则进入“是否完成任务”确认 / If task exists, ask whether to mark done
-        if (!taskId.isEmpty())
-        {
-            StateMachine::taskCompletePromptState.setContext(
-                taskId,
-                taskName,
-                sessionId,
-                (uint32_t)(duration * 60),
-                true,
-                false,
-                taskDisplayName);
-            stateMachine.changeState(&StateMachine::taskCompletePromptState);
-        }
+	        if (!taskId.isEmpty())
+	        {
+	            StateMachine::taskCompletePromptState.setContext(
+	                taskId,
+	                taskName,
+	                sessionId,
+	                (uint32_t)(duration * 60),
+	                true,
+	                false,
+	                taskDisplayName,
+	                taskProjectId);
+	            stateMachine.changeState(&StateMachine::taskCompletePromptState);
+	        }
         else
         {
             stateMachine.changeState(&StateMachine::doneState); // Transition to Done State / 切换到完成状态
@@ -268,7 +274,8 @@ void TimerState::setTimer(int duration,
                           const String& taskId,
                           const String& taskName,
                           const String& sessionId,
-                          const String& taskDisplayName)
+                          const String& taskDisplayName,
+                          const String& taskProjectId)
 {
     this->duration = duration;
     this->elapsedTime = elapsedTime;
@@ -276,4 +283,5 @@ void TimerState::setTimer(int duration,
     this->taskName = taskName;
     this->sessionId = sessionId;
     this->taskDisplayName = taskDisplayName;
+    this->taskProjectId = taskProjectId;
 }

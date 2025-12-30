@@ -12,6 +12,7 @@
 #include "states/SleepState.h"
 #include "states/StartupState.h"
 #include "states/TaskCompletePromptState.h"
+#include "states/TaskDetailState.h"
 #include "states/TaskListState.h"
 #include "states/TaskListViewState.h"
 #include "states/TimerState.h"
@@ -36,6 +37,7 @@ public:
     static SleepState sleepState;
     static StartupState startupState;
     static TaskCompletePromptState taskCompletePromptState;
+    static TaskDetailState taskDetailState;
     static TaskListState taskListState;
     static TaskListViewState taskListViewState;
     static TimerState timerState;

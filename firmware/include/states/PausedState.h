@@ -16,12 +16,14 @@ public:
                   const String& taskId = "",
                   const String& taskName = "",
                   const String& sessionId = "",
-                  const String& taskDisplayName = "");
+                  const String& taskDisplayName = "",
+                  const String& taskProjectId = "");
 
 private:
     int duration;
     unsigned long pauseEnter;
     unsigned long elapsedTime;
+    String taskProjectId;
     String taskId;
     String taskName;
     String sessionId;
